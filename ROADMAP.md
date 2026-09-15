@@ -23,6 +23,10 @@ Define measurable limits and workload classes for:
 
 Establish benchmark metrics before optimising implementation.
 
+Deliverable:
+
+    docs/research/constraints.md
+
 ### R0.1 — Reference architecture research
 
 Study architecture and implementation strategies used by:
