@@ -1,0 +1,11 @@
+name "d-imagery"
+description "High-performance image engine for large geospatial imagery"
+authors "Alexander Bernardi"
+copyright "Copyright © 2026, Alexander Bernardi"
+license "MIT"
+
+targetType "library"
+
+sourcePaths "source"
+
+dflags "-preview=dip1000"

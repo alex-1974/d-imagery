@@ -1,0 +1,25 @@
+.dub/
+dub.selections.json
+docs.json
+__dummy.html
+
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# Benchmark imagery is never versioned.
+/data/raw/
+/data/prepared/
+/data/cache/
+/data/reports/
+
+# Local benchmark artefacts
+*.benchmark.json
+*.profile
+
+# DUB generated test executables
+/d-imagery-test-library
