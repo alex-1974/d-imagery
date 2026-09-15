@@ -529,9 +529,184 @@ R0.2 Memory Model Research                     ACTIVE
   Native AVX2 check                             DONE
   Benchmark methodology                         DONE
 
-  Interleaved vs planar layout                  NEXT
-  External buffers                              OPEN
+  Interleaved vs planar layout                  DONE
+  External buffers                              NEXT
   Ownership / lifetime                          OPEN
   Final memory-model synthesis                  OPEN
 ```
+
+## Channel-layout findings
+
+R0.2 compared float RGB storage in two layouts:
+
+- interleaved / AoS-like: `RGB RGB RGB ...`
+- planar / SoA-like: `RRR... GGG... BBB...`
+
+The purpose was not to select a universal storage format, but to determine
+whether channel layout materially affects CPU execution and therefore needs to
+be represented explicitly by the engine.
+
+### RGB to grayscale
+
+The grayscale kernel reads all three channels and produces one output channel.
+
+Portable measurements consistently favored planar storage. Native AVX2
+measurements reduced the variance and showed a stable planar throughput
+advantage of approximately 26%.
+
+Assembly explains the difference.
+
+For planar input, each channel is already a linear SIMD stream. The hot loop
+loads R, G and B vectors directly, performs the weighted arithmetic, and
+stores grayscale vectors.
+
+For interleaved input, LLVM also vectorizes the operation, but first has to
+reconstruct separate R, G and B vectors from `RGBRGB...`. On AVX2 this requires
+multiple `vblendps` and `vpermps` operations for each group of pixels.
+
+Conclusion:
+
+- both layouts are SIMD-compatible;
+- planar avoids repeated in-register deinterleaving for channel-combining
+  operations.
+
+### Single-channel extraction
+
+Materialized green-channel extraction showed a much larger difference.
+
+The planar implementation is a linear copy from the G plane. Native code is a
+straight YMM load/store loop.
+
+The interleaved implementation has a stride of three floats between successive
+G samples. Native LLVM used gather operations plus address-vector arithmetic.
+
+Measured planar throughput was approximately twice interleaved throughput.
+
+This benchmark is deliberately conservative for planar storage: a real engine
+may often expose an existing plane as a zero-copy view instead of materializing
+it at all.
+
+Conclusion:
+
+- band-selective access is a strong planar use case;
+- channel layout must be visible to planning code.
+
+### Channel-specific gain/bias
+
+A per-channel point operation applied independent gain and bias values to R, G
+and B while reading and writing all three channels.
+
+This removes the reduced-input-bandwidth advantage of channel extraction:
+both layouts touch the complete RGB image.
+
+Planar nevertheless remained substantially faster.
+
+Native assembly showed why:
+
+- planar uses a regular AVX2 loop over eight samples from each channel;
+- interleaved does not vectorize efficiently across multiple RGB pixels when
+  different coefficients repeat with period three.
+
+Native measurements showed roughly 47-54% higher planar throughput.
+
+Conclusion:
+
+- the planar advantage is not limited to reduced memory traffic;
+- channel-specific arithmetic can expose a substantial SIMD-layout effect.
+
+### Channel-uniform gain/bias
+
+A counterexample applied the same gain and bias to every RGB component.
+
+In this case an interleaved buffer can be treated simply as one contiguous
+float stream.
+
+Native LLVM generated an efficient AVX2 loop over 32 consecutive components
+for the interleaved representation. The planar implementation also generated
+a regular AVX2 loop.
+
+Native performance was effectively equal; the measured planar difference was
+only about 1%, with overlapping timing distributions.
+
+Conclusion:
+
+- interleaved storage is not intrinsically slower;
+- layout penalties arise from the relationship between layout and operation;
+- channel-uniform operations should normally process the existing layout
+  directly.
+
+### Layout conversion
+
+Both explicit conversions were measured:
+
+- interleaved to planar;
+- planar to interleaved.
+
+For a 4096 x 4096 float RGB image, native median timings averaged approximately:
+
+| Conversion | Mean median |
+|---|---:|
+| interleaved -> planar | 31.82 ms |
+| planar -> interleaved | 32.60 ms |
+| roundtrip | 64.42 ms |
+
+AVX2 vectorizes both directions, but neither conversion becomes a simple
+streaming copy. Deinterleaving and interleaving require permutations, blends,
+and shuffles.
+
+There was no stable evidence that either conversion direction is inherently
+cheaper.
+
+Using the measured native operation differences gives approximate break-even
+orders of magnitude:
+
+| Operation | I->P only | I->P->I |
+|---|---:|---:|
+| RGB -> grayscale | ~8 operations | ~16 operations |
+| single-channel extraction | ~3 operations | ~6 operations |
+| channel-specific gain/bias | ~4 operations | ~7 operations |
+| channel-uniform gain/bias | ~134 operations | ~270 operations |
+
+These numbers are experimental observations for this machine and benchmark,
+not production scheduling thresholds.
+
+### Channel-layout conclusion
+
+R0.2 rejects both simplistic alternatives:
+
+1. interleaved should not be the mandatory internal processing layout;
+2. planar should not be the mandatory universal storage layout.
+
+Instead, channel layout should be explicit raster metadata.
+
+Both planar and interleaved representations are first-class layouts.
+
+The preferred processing strategy depends on the operation:
+
+- channel-uniform processing can efficiently retain the source layout;
+- band-selective, channel-combining, and channel-specific pipelines often
+  favor planar storage;
+- conversion should be considered only when the expected downstream savings
+  exceed its cost.
+
+A future execution planner may therefore choose a layout transformation for a
+sufficiently long operation chain, but individual image operations should not
+encode a universal layout assumption.
+
+Provisional model:
+
+```text
+RasterView
+    |
+    +-- geometry / extent / strides
+    |
+    +-- channel layout
+            |
+            +-- interleaved
+            |
+            +-- planar
+```
+
+Channel layout is a property of the resident raster representation, not of the
+logical image operation itself.
 

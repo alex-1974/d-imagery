@@ -1,6 +1,7 @@
 module app;
 
 import mir.ndslice;
+import layout_rgb;
 import std.algorithm.sorting : sort;
 import std.datetime.stopwatch : StopWatch;
 import std.stdio : writefln, writeln;
@@ -488,6 +489,7 @@ void main()
      */
     enum SUM_INNER = 24;
     enum TRANSFORM_INNER = 8;
+    enum LAYOUT_INNER = 4;
 
     writeln("d-imagery R0.2 memory-model benchmark");
     writeln("======================================");
@@ -787,4 +789,367 @@ void main()
         ],
         ROI_H * ROI_W,
         TRANSFORM_INNER);
+
+    /* ------------------------------------------------------------------ */
+    /* RGB channel-layout experiment                                     */
+    /* ------------------------------------------------------------------ */
+
+    writeln;
+    writeln("RGB layout — float RGB -> grayscale");
+
+    enum PIXELS = H * W;
+
+    auto rgbInterleaved =
+        new float[PIXELS * 3];
+
+    auto rgbRed =
+        new float[PIXELS];
+
+    auto rgbGreen =
+        new float[PIXELS];
+
+    auto rgbBlue =
+        new float[PIXELS];
+
+    auto grayInterleaved =
+        new float[PIXELS];
+
+    auto grayPlanar =
+        new float[PIXELS];
+
+    /*
+     * Materialize exactly the same logical image in both layouts.
+     *
+     * Initialization is outside the timed region.
+     */
+    foreach (i; 0 .. PIXELS)
+    {
+        const r =
+            cast(float)((i * 17 + 3) & 1023) /
+            1023.0f;
+
+        const g =
+            cast(float)((i * 29 + 7) & 1023) /
+            1023.0f;
+
+        const b =
+            cast(float)((i * 43 + 11) & 1023) /
+            1023.0f;
+
+        const base = i * 3;
+
+        rgbInterleaved[base]     = r;
+        rgbInterleaved[base + 1] = g;
+        rgbInterleaved[base + 2] = b;
+
+        rgbRed[i]   = r;
+        rgbGreen[i] = g;
+        rgbBlue[i]  = b;
+    }
+
+    const interleavedProbe =
+        rgbToGrayInterleaved(
+            rgbInterleaved,
+            grayInterleaved);
+
+    const planarProbe =
+        rgbToGrayPlanar(
+            rgbRed,
+            rgbGreen,
+            rgbBlue,
+            grayPlanar);
+
+    assert(interleavedProbe == planarProbe);
+    assert(grayInterleaved == grayPlanar);
+
+    writeln("RGB -> grayscale correctness: PASS");
+
+    const sourceBytesPerLayout =
+        cast(double)(PIXELS * 3 * float.sizeof);
+
+    const outputBytesPerLayout =
+        cast(double)(PIXELS * float.sizeof);
+
+    writefln(
+        "source per layout: %.1f MiB",
+        sourceBytesPerLayout /
+            (1024.0 * 1024.0));
+
+    writefln(
+        "output per layout: %.1f MiB",
+        outputBytesPerLayout /
+            (1024.0 * 1024.0));
+
+    writefln(
+        "experiment resident data: %.1f MiB",
+        (2.0 * sourceBytesPerLayout +
+         2.0 * outputBytesPerLayout) /
+            (1024.0 * 1024.0));
+
+    benchmarkFloatGroup(
+        [
+            FloatCase(
+                "RGB interleaved",
+                () => rgbToGrayInterleaved(
+                    rgbInterleaved,
+                    grayInterleaved)),
+
+            FloatCase(
+                "RGB planar",
+                () => rgbToGrayPlanar(
+                    rgbRed,
+                    rgbGreen,
+                    rgbBlue,
+                    grayPlanar)),
+        ],
+        PIXELS,
+        LAYOUT_INNER);
+
+
+    /* ------------------------------------------------------------------ */
+    /* RGB channel extraction                                             */
+    /* ------------------------------------------------------------------ */
+
+    writeln;
+    writeln("RGB layout — green channel extraction");
+
+    const extractInterleavedProbe =
+        extractGreenInterleaved(
+            rgbInterleaved,
+            grayInterleaved);
+
+    const extractPlanarProbe =
+        extractGreenPlanar(
+            rgbGreen,
+            grayPlanar);
+
+    assert(extractInterleavedProbe == extractPlanarProbe);
+    assert(grayInterleaved == grayPlanar);
+
+    writeln("green extraction correctness: PASS");
+
+    benchmarkFloatGroup(
+        [
+            FloatCase(
+                "extract G interleaved",
+                () => extractGreenInterleaved(
+                    rgbInterleaved,
+                    grayInterleaved)),
+
+            FloatCase(
+                "extract G planar",
+                () => extractGreenPlanar(
+                    rgbGreen,
+                    grayPlanar)),
+        ],
+        PIXELS,
+        LAYOUT_INNER);
+
+
+    /* ------------------------------------------------------------------ */
+    /* RGB per-channel point transform                                    */
+    /* ------------------------------------------------------------------ */
+
+    writeln;
+    writeln("RGB layout — per-channel gain/bias");
+
+    /*
+     * Keep values safely bounded across repeated in-place benchmark calls.
+     * Both layouts receive exactly the same operation count.
+     */
+    enum float RGB_GAIN_R = 1.0001f;
+    enum float RGB_GAIN_G = 0.9999f;
+    enum float RGB_GAIN_B = 1.0002f;
+
+    enum float RGB_BIAS_R =  0.00001f;
+    enum float RGB_BIAS_G = -0.00002f;
+    enum float RGB_BIAS_B =  0.000015f;
+
+    const gainInterleavedProbe =
+        gainBiasInterleavedInPlace(
+            rgbInterleaved,
+            RGB_GAIN_R,
+            RGB_GAIN_G,
+            RGB_GAIN_B,
+            RGB_BIAS_R,
+            RGB_BIAS_G,
+            RGB_BIAS_B);
+
+    const gainPlanarProbe =
+        gainBiasPlanarInPlace(
+            rgbRed,
+            rgbGreen,
+            rgbBlue,
+            RGB_GAIN_R,
+            RGB_GAIN_G,
+            RGB_GAIN_B,
+            RGB_BIAS_R,
+            RGB_BIAS_G,
+            RGB_BIAS_B);
+
+    assert(gainInterleavedProbe == gainPlanarProbe);
+
+    foreach (i; 0 .. PIXELS)
+    {
+        const base = i * 3;
+
+        assert(rgbInterleaved[base] == rgbRed[i]);
+        assert(rgbInterleaved[base + 1] == rgbGreen[i]);
+        assert(rgbInterleaved[base + 2] == rgbBlue[i]);
+    }
+
+    writeln("per-channel gain/bias correctness: PASS");
+
+    benchmarkFloatGroup(
+        [
+            FloatCase(
+                "gain/bias interleaved",
+                () => gainBiasInterleavedInPlace(
+                    rgbInterleaved,
+                    RGB_GAIN_R,
+                    RGB_GAIN_G,
+                    RGB_GAIN_B,
+                    RGB_BIAS_R,
+                    RGB_BIAS_G,
+                    RGB_BIAS_B)),
+
+            FloatCase(
+                "gain/bias planar",
+                () => gainBiasPlanarInPlace(
+                    rgbRed,
+                    rgbGreen,
+                    rgbBlue,
+                    RGB_GAIN_R,
+                    RGB_GAIN_G,
+                    RGB_GAIN_B,
+                    RGB_BIAS_R,
+                    RGB_BIAS_G,
+                    RGB_BIAS_B)),
+        ],
+        PIXELS,
+        LAYOUT_INNER);
+
+
+    /* ------------------------------------------------------------------ */
+    /* Uniform RGB component transform                                    */
+    /* ------------------------------------------------------------------ */
+
+    writeln;
+    writeln("RGB layout — uniform component gain/bias");
+
+    enum float UNIFORM_GAIN = 1.0001f;
+    enum float UNIFORM_BIAS = 0.00001f;
+
+    const uniformInterleavedProbe =
+        uniformGainBiasInterleavedInPlace(
+            rgbInterleaved,
+            UNIFORM_GAIN,
+            UNIFORM_BIAS);
+
+    const uniformPlanarProbe =
+        uniformGainBiasPlanarInPlace(
+            rgbRed,
+            rgbGreen,
+            rgbBlue,
+            UNIFORM_GAIN,
+            UNIFORM_BIAS);
+
+    assert(uniformInterleavedProbe == uniformPlanarProbe);
+
+    foreach (i; 0 .. PIXELS)
+    {
+        const base = i * 3;
+
+        assert(rgbInterleaved[base] == rgbRed[i]);
+        assert(rgbInterleaved[base + 1] == rgbGreen[i]);
+        assert(rgbInterleaved[base + 2] == rgbBlue[i]);
+    }
+
+    writeln("uniform gain/bias correctness: PASS");
+
+    benchmarkFloatGroup(
+        [
+            FloatCase(
+                "uniform interleaved",
+                () => uniformGainBiasInterleavedInPlace(
+                    rgbInterleaved,
+                    UNIFORM_GAIN,
+                    UNIFORM_BIAS)),
+
+            FloatCase(
+                "uniform planar",
+                () => uniformGainBiasPlanarInPlace(
+                    rgbRed,
+                    rgbGreen,
+                    rgbBlue,
+                    UNIFORM_GAIN,
+                    UNIFORM_BIAS)),
+        ],
+        PIXELS,
+        LAYOUT_INNER);
+
+
+    /* ------------------------------------------------------------------ */
+    /* RGB layout conversion                                              */
+    /* ------------------------------------------------------------------ */
+
+    writeln;
+    writeln("RGB layout — layout conversion");
+
+    const toPlanarProbe =
+        interleavedToPlanar(
+            rgbInterleaved,
+            rgbRed,
+            rgbGreen,
+            rgbBlue);
+
+    const toInterleavedProbe =
+        planarToInterleaved(
+            rgbRed,
+            rgbGreen,
+            rgbBlue,
+            rgbInterleaved);
+
+    assert(toPlanarProbe == toInterleavedProbe);
+
+    foreach (i; 0 .. PIXELS)
+    {
+        const base = i * 3;
+
+        assert(rgbInterleaved[base] == rgbRed[i]);
+        assert(rgbInterleaved[base + 1] == rgbGreen[i]);
+        assert(rgbInterleaved[base + 2] == rgbBlue[i]);
+    }
+
+    writeln("layout conversion correctness: PASS");
+
+    /*
+     * Each conversion reads and writes all three float channels:
+     *
+     *     12 B read + 12 B write = 24 B / pixel
+     *
+     * Both representations remain logically identical after every
+     * iteration, so the two benchmark cases may safely rotate.
+     */
+    benchmarkFloatGroup(
+        [
+            FloatCase(
+                "interleaved -> planar",
+                () => interleavedToPlanar(
+                    rgbInterleaved,
+                    rgbRed,
+                    rgbGreen,
+                    rgbBlue)),
+
+            FloatCase(
+                "planar -> interleaved",
+                () => planarToInterleaved(
+                    rgbRed,
+                    rgbGreen,
+                    rgbBlue,
+                    rgbInterleaved)),
+        ],
+        PIXELS,
+        LAYOUT_INNER);
+
 }

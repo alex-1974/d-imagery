@@ -13,7 +13,32 @@ Initial comparison:
 
 The first experiment intentionally uses a simple read reduction.
 
-It tests traversal overhead and optimizer visibility before introducing RGB
-layouts, transformations, SIMD, threading or real imagery.
+The initial phase tests traversal overhead and optimizer visibility before
+adding higher-level layout experiments. Later sections extend the same R0.2
+experiment with RGB channel layouts, point transformations, and SIMD/codegen
+analysis. Threading and real imagery remain outside this experiment.
 
 Results must be compared with both DMD and LDC.
+
+## Channel-layout experiment
+
+The R0.2 experiment also compares float RGB channel layouts:
+
+- interleaved: `RGBRGB...`
+- planar: separate R, G and B planes
+
+Kernels cover:
+
+- RGB to grayscale;
+- single-channel extraction;
+- channel-specific gain/bias;
+- channel-uniform gain/bias;
+- interleaved/planar conversion.
+
+The results show that layout performance is operation-dependent. Planar storage
+is strongly favorable for band-oriented and channel-specific work, while
+channel-uniform native AVX2 processing reaches practical parity between the
+layouts.
+
+The experiment therefore treats channel layout as explicit raster metadata
+rather than selecting one mandatory universal layout.
