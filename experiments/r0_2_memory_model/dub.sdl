@@ -1,0 +1,10 @@
+name "r0-2-memory-model"
+description "R0.2 memory-model experiments for d-imagery"
+authors "Alexander Bernardi"
+license "MIT"
+
+targetType "executable"
+
+dependency "mir-algorithm" version="~>3.0"
+
+sourceFiles "app.d"
