@@ -14,3 +14,6 @@ public import imagery.raster.region :
 
 public import imagery.raster.view :
     RasterView;
+
+public import imagery.raster.backing :
+    RasterLease;
