@@ -24,46 +24,18 @@ import std.typecons :
 import imagery.raster.descriptor :
     PlaneDescriptor;
 
+import imagery.raster.resource :
+    ResourceEntry;
+
+import imagery.raster.validation :
+    validateRasterBackingLayout;
+
 import imagery.raster.region :
     Region2D;
 
 import imagery.raster.view :
     RasterView,
     makeRasterViewAssumeValidated;
-
-
-/++
-    Release callback for one retained external resource.
-
-    The callback receives exactly the metadata registered for the resource.
-+/
-package(imagery.raster)
-alias ReleaseFn =
-    void function(
-        void* context,
-        void* base,
-        size_t byteLength
-    )
-    nothrow
-    @nogc;
-
-
-/++
-    One retained physical resource.
-
-    RasterBacking may contain any number of independent resources.
-+/
-package(imagery.raster)
-struct ResourceEntry
-{
-    void* base;
-
-    size_t byteLength;
-
-    void* releaseContext;
-
-    ReleaseFn releaseFn;
-}
 
 
 /++
@@ -342,6 +314,15 @@ RasterBacking!ubyte makeLifetimeTestBacking(
             width,
             height
         );
+
+    const validation =
+        validateRasterBackingLayout!ubyte(
+            backing.resources_,
+            backing.descriptors_,
+            backing.fullRegion_
+        );
+
+    assert(validation.ok);
 
     return move(backing);
 }
