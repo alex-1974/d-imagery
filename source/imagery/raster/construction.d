@@ -220,6 +220,11 @@ MetadataCopyError copyMetadata(T)(
 nothrow
 @nogc
 {
+    static assert(
+        __traits(isPOD, T),
+        "Raw metadata copying requires POD metadata entries."
+    );
+
     copied = null;
     allocation = null;
 
