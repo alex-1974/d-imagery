@@ -628,3 +628,19 @@ excluding types whose copy, destruction, GC reachability, or ownership
 semantics cannot be reconstructed safely from arbitrary retained bytes.
 
 The restriction is represented by `isRasterSampleType!T`.
+
+
+## C6 external retained import
+
+The first public retained-storage adapter is specified separately:
+
+```text
+docs/architecture/raster-external-import.md
+```
+
+The design introduces an ownership token above raw ResourceEntry and keeps
+external byte-oriented layout conversion outside the core PlaneDescriptor
+representation.
+
+The initial adapter deliberately supports one physical resource with multiple
+logical planes. Multi-resource adoption remains a later extension.
