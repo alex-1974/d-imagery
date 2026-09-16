@@ -1,0 +1,12 @@
+name "r0-3-raster-view"
+description "R0.3 raster core view experiments for d-imagery"
+authors "Alexander Bernardi"
+license "MIT"
+
+targetType "executable"
+
+dflags "-preview=dip1000"
+
+dependency "mir-algorithm" version="~>3.0"
+
+sourceFiles "app.d"
