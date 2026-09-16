@@ -1,20 +1,26 @@
 /++
-    Logical two-dimensional raster region geometry.
+    Two-dimensional raster region geometry.
 
     Region2D contains geometry only. It does not own storage and does not
     imply that any backing memory exists.
 
-    Coordinates and extents use size_t because they describe logical raster
-    geometry. Arithmetic involving absolute extents must remain overflow-safe.
+    Region2D deliberately does not define which coordinate space it belongs
+    to. Higher layers may use it for logical/global image regions, while
+    RasterView uses it for resident descriptor-space regions.
+
+    Coordinates and extents use size_t. Arithmetic involving translated
+    extents must remain overflow-safe.
 +/
 module imagery.raster.region;
 
 
 /++
-    Rectangular logical raster region.
+    Rectangular raster region.
 
-    `x` and `y` identify the region origin in its enclosing logical coordinate
-    system. `width` and `height` are extents.
+    `x` and `y` identify the region origin in its enclosing coordinate system.
+    `width` and `height` are extents.
+
+    The owner of a Region2D defines the coordinate-space semantics.
 
     Empty regions are representable.
 +/
@@ -40,7 +46,7 @@ struct Region2D
 
 
     /++
-        Returns true when the absolute end coordinates can be represented
+        Returns true when the translated end coordinates can be represented
         without overflowing size_t.
 
         This deliberately uses subtraction-based checks instead of unchecked
@@ -90,7 +96,8 @@ struct Region2D
 
 
     /++
-        Resolves a relative child region into the enclosing coordinate system.
+        Resolves a relative child region into the same enclosing coordinate
+        system as this region.
 
         Returns false if the parent extent itself is not representable, if the
         relative child is outside the parent, or if absolute translation would

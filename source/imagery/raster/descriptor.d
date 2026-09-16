@@ -1,9 +1,9 @@
 /++
     Physical plane metadata for raster storage.
 
-    PlaneDescriptor is intentionally access-neutral. It describes where a
-    logical plane starts and how samples are reached, but it does not itself
-    grant write permission.
+    PlaneDescriptor is intentionally access-neutral. It describes the
+    physical origin of one resident plane and how samples are reached, but it
+    does not itself grant write permission.
 
     Ownership and lifetime are handled separately by retained backing/lease
     types.
@@ -14,7 +14,12 @@ module imagery.raster.descriptor;
 /++
     Physical metadata for one logical raster plane.
 
-    `base` identifies the first sample of the physical plane representation.
+    `base` identifies descriptor-space coordinate `(0, 0)` of the physical
+    plane representation.
+
+    This is a resident-storage coordinate origin. It is not the global/logical
+    image origin unless a higher layer deliberately makes those coordinate
+    systems identical.
 
     Strides are signed and expressed in elements of the sample type interpreted
     by the RasterView using this descriptor. Resource allocation sizes remain

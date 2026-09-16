@@ -8,6 +8,23 @@ read-only raster foundation.
 This document defines ownership and failure semantics before public
 construction APIs are introduced.
 
+## Coordinate-space prerequisite
+
+Retained construction uses resident descriptor-space geometry.
+
+Global LogicalImage placement is intentionally outside RasterBacking and
+RasterView.
+
+See:
+
+```text
+docs/architecture/raster-coordinate-model.md
+```
+
+This distinction is required for streaming small resident windows from very
+large logical images.
+
+
 ## 1. Context
 
 The production raster foundation already provides:
