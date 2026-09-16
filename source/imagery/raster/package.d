@@ -11,3 +11,6 @@ public import imagery.raster.descriptor :
 
 public import imagery.raster.region :
     Region2D;
+
+public import imagery.raster.view :
+    RasterView;
