@@ -29,7 +29,8 @@ struct AffineRGBView(T)
         size_t y,
         size_t roiWidth,
         size_t roiHeight
-    ) nothrow @nogc
+    )
+        return scope nothrow @nogc
     {
         assert(x <= width);
         assert(y <= height);
@@ -96,7 +97,8 @@ struct MultiPlaneRasterView(T)
         size_t y,
         size_t roiWidth,
         size_t roiHeight
-    ) nothrow @nogc
+    )
+        return scope nothrow @nogc
     {
         assert(x <= width);
         assert(y <= height);

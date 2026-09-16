@@ -8,11 +8,11 @@ R0.3 Raster Core Type Research                  ACTIVE
   RasterView semantic model                     ACTIVE
   Multi-plane representation                    EXPERIMENTALLY SUPPORTED
   ROI construction cost                         DONE
-  Descriptor lifetime                           NEXT
+  Descriptor lifetime                           DONE
   Metadata size                                 DONE
   Optimizer/codegen visibility                  DONE
-  Mir adaptation                                OPEN
-  Final core-type synthesis                     OPEN
+  Mir adaptation                                DONE
+  Final core-type synthesis                     NEXT
 ```
 
 ## 1. Context
@@ -597,14 +597,370 @@ layout-aware execution dispatch
 This remains provisional until descriptor lifetime, const/mutable semantics,
 Mir adaptation and trusted construction boundaries are validated.
 
+### Descriptor lifetime experiment
+
+The descriptor lifetime model was tested with a retained representation that
+owns:
+
+- multiple physically independent backing allocations;
+- a stable `PlaneDescriptor[]` block;
+- release metadata for every backing resource.
+
+The experimental ownership chain is:
+
+```text
+RasterBacking
+    |
+    +-- ResourceEntry[]
+    |       |
+    |       +-- backing allocation 0
+    |       +-- backing allocation 1
+    |       +-- ...
+    |
+    +-- stable PlaneDescriptor[]
+             |
+             v
+       SafeRefCounted
+             |
+             v
+        RasterLease
+             |
+             | borrow
+             v
+        RasterView
+             |
+             | return scope
+             v
+            ROI
+```
+
+The concrete use of `SafeRefCounted` remains an implementation experiment,
+not a required public API semantic.
+
+#### Positive lifetime results
+
+Both DMD and LDC validated that:
+
+- three independent plane allocations may be retained by one representation;
+- the descriptor block remains alive with those resources;
+- a `RasterView` can borrow that stable descriptor block;
+- copying `RasterLease` retains the entire representation;
+- destroying an intermediate lease does not free the resources;
+- destroying the final lease releases every independent resource exactly once;
+- ROI creation reuses the same descriptor block;
+- a lease-bound ROI can be used from `@safe` code;
+- nested ROI transformations remain valid inside the lease lifetime.
+
+No descriptor allocation or reconstruction is required by ROI construction.
+
+#### DIP1000 escape protection
+
+Negative compile-time probes were evaluated with both DMD and LDC using
+`-preview=dip1000`.
+
+Both compilers rejected:
+
+```text
+return RasterView past local RasterLease
+return ROI past local RasterLease
+return nested ROI past local RasterLease
+assign RasterView to longer-lived outer local
+assign RasterView to global state
+assign RasterView into independently living heap object
+```
+
+The direct view return is diagnosed as an escape from the local lease.
+
+For ROI transformation, `MultiPlaneRasterView.roi()` and
+`AffineRGBView.roi()` use `return scope`, preserving the alias provenance of
+the source view.
+
+The resulting behavior is:
+
+```text
+lease.view()
+    |
+    +-- safe use within lease              PASS
+    |
+    +-- return beyond lease                REJECT
+
+lease.view().roi(...)
+    |
+    +-- safe use within lease              PASS
+    |
+    +-- return beyond lease                REJECT
+
+lease.view().roi(...).roi(...)
+    |
+    +-- safe use within lease              PASS
+    |
+    +-- return beyond lease                REJECT
+```
+
+For nested ROI escape, both compilers diagnose the returned ROI as derived
+from a scope variable.
+
+This demonstrates transitive lifetime propagation through repeated
+allocation-free ROI transformations.
+
+#### R0.3 lifetime conclusion
+
+The experiment supports the following design direction:
+
+> `RasterView` remains fully non-owning. Stable plane descriptors and every
+> resource referenced by them are retained by an owning representation behind
+> `RasterLease`. DIP1000 ties views and derived ROIs to that lease.
+
+A lease is therefore not synonymous with one allocation.
+
+It may retain:
+
+- one contiguous allocation;
+- multiple planar allocations;
+- decoder-owned resources;
+- mapped storage;
+- cache blocks;
+- or another composite retained representation.
+
+The trusted construction boundary remains responsible for validating that
+every descriptor refers to storage retained by the same representation.
+
+### Mir adaptation experiment
+
+The R0.3 experiments validate Mir as an internal execution substrate without
+making Mir types part of the d-imagery raster semantic model.
+
+The boundary is:
+
+```text
+MultiPlaneRasterView
+        |
+        | d-imagery semantics
+        v
+internal Mir adapter
+        |
+        +-- Universal 2D
+        +-- Canonical 2D
+        +-- Contiguous 2D
+        +-- Contiguous 1D fast path
+        |
+        v
+kernel implementation
+```
+
+`PlaneDescriptor` therefore remains d-imagery metadata. An `ndslice` is an
+ephemeral execution view constructed from an already validated
+`RasterView`.
+
+#### Representation mapping
+
+The tested mapping is:
+
+```text
+arbitrary row/sample stride
+    -> Slice!(T*, 2, Universal)
+
+sampleStride == 1
+    -> Slice!(T*, 2, Canonical)
+
+sampleStride == 1
+and rowStride == logical width
+    -> Slice!(T*, 2, Contiguous)
+
+fully contiguous and operation is linearizable
+    -> Slice!(T*, 1, Contiguous)
+```
+
+This distinction is important for ROI.
+
+A narrow ROI cut from a physically contiguous full image remains unit-stride
+in x, but its physical row stride is still the full source row width.
+
+Such a view is:
+
+```text
+Canonical
+not Contiguous
+```
+
+The adapter therefore does not infer full contiguity merely from
+`sampleStride == 1`.
+
+All tested mappings are O(1) and allocate no pixel or descriptor storage.
+
+#### Lifetime preservation
+
+Mir adaptation preserves the existing lease lifetime relation.
+
+Both DMD and LDC accept a Mir slice used while its originating `RasterLease`
+is alive.
+
+Both reject returning the adapted slice beyond that lease lifetime.
+
+The chain therefore remains:
+
+```text
+RasterLease
+    |
+    v
+RasterView
+    |
+    | return scope
+    v
+Mir Slice
+```
+
+Mir does not provide an escape hatch around the DIP1000 lifetime boundary.
+
+#### Code-generation results
+
+LDC 1.41 / LLVM 19.1.7 with native AVX2 was used for the code-generation
+probe.
+
+The same in-place float gain/bias operation was compiled for the different
+slice kinds.
+
+Observed instruction counts:
+
+```text
+Universal 2D              134
+Canonical 2D               57
+Contiguous 2D              57
+Contiguous 1D              37
+raw pointer 1D baseline    39
+```
+
+`Universal` still vectorized when the runtime sample stride happened to be
+one.
+
+LLVM generated a runtime layout/versioning check before entering its AVX2
+unit-stride fast path.
+
+The general representation therefore does not imply permanently scalar
+execution, but it carries substantially more dispatch/control code.
+
+`Canonical` eliminates that runtime sample-stride decision. It produced a
+direct row-wise AVX2 loop.
+
+For the tested nested 2D kernel, `Canonical` and `Contiguous` produced
+essentially equivalent vector loops. Merely changing the slice kind to
+`Contiguous` did not remove the row loop.
+
+#### Linear contiguous fast path
+
+A fully contiguous region can instead be adapted explicitly to a
+one-dimensional `Contiguous` Mir slice when the operation is semantically
+linearizable.
+
+The resulting kernel produced:
+
+```text
+Mir Contiguous 1D     37 instructions
+raw pointer baseline  39 instructions
+```
+
+Both used the same four-wide-block AVX2 loop structure:
+
+```text
+4 x YMM loads
+4 x vmulps
+4 x vaddps
+4 x YMM stores
+```
+
+followed by the same scalar tail strategy.
+
+This is strong evidence that the internal Mir representation can provide a
+zero-cost abstraction for the contiguous linear fast path on the tested
+compiler/toolchain.
+
+The slight instruction-count difference between the Mir and raw-pointer
+versions is in loop/exit bookkeeping, not in the vector hot loop.
+
+#### Execution implication
+
+The experiments support classification once before entering a hot kernel:
+
+```text
+RasterView
+    |
+    v
+layout classifier
+    |
+    +-- arbitrary stride
+    |       -> Universal kernel
+    |
+    +-- unit x stride
+    |       -> Canonical row kernel
+    |
+    +-- fully contiguous, 2D semantics required
+    |       -> Contiguous 2D kernel
+    |
+    +-- fully contiguous, linearizable operation
+            -> Contiguous 1D kernel
+```
+
+Physical execution representation is therefore a scheduling concern, not a
+reason to weaken the general `RasterView` semantic model.
+
+#### Remaining implementation invariant
+
+Linear adaptation computes the logical element count as:
+
+```text
+width * height
+```
+
+The final trusted construction/classification layer must guarantee that this
+product and all stride/offset arithmetic are representable without overflow.
+
+R0.3 keeps this requirement explicit through the flat-adaptation predicate;
+the final core types must make it part of the validated view invariants.
+
+#### R0.3 Mir conclusion
+
+The experiments support Mir as an internal substrate.
+
+They do not support exposing Mir types in the public d-imagery API.
+
+The preferred relationship is:
+
+```text
+public/internal d-imagery raster semantics
+        |
+        v
+validated RasterView
+        |
+        v
+small internal Mir adapter
+        |
+        v
+layout-specialized kernel
+```
+
+The adapter is allocation-free and can retain the optimizer visibility
+needed for efficient AVX2 execution.
+
+The contiguous one-dimensional path is effectively equivalent to the tested
+raw-pointer implementation.
+
 ### Next question
 
-The next R0.3 research problem is descriptor lifetime.
+The next R0.3 step is final core-type synthesis.
 
-Specifically:
+The synthesis must turn the experimentally supported pieces into one
+coherent provisional core design:
 
-- where stable `PlaneDescriptor` metadata lives;
-- whether the descriptor block is retained directly by `RasterLease`;
-- how a lease may retain multiple independent backing allocations;
-- how `RasterView` safely borrows both the descriptors and their resources;
-- whether ROI views remain allocation-free under the complete lifetime model.
+- immutable versus mutable `RasterView` types;
+- exact `PlaneDescriptor` fields and stride units;
+- region/origin representation;
+- validated/trusted construction boundaries;
+- descriptor and backing-resource ownership behind `RasterLease`;
+- arbitrary-N-band representation;
+- planar and interleaved layout metadata;
+- layout classification;
+- Mir adaptation as an internal implementation detail;
+- generic, canonical and contiguous execution paths;
+- invariants required for overflow, alignment and reachable storage;
+- API boundaries that remain independent of Mir and of a specific ownership
+  implementation.

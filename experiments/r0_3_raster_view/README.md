@@ -109,3 +109,102 @@ The naive specialized three-stream interpretation of interleaved RGB was
 slightly slower than the specialized single-physical-stream affine kernel.
 This is treated as an execution-dispatch issue, not as evidence against the
 general band-oriented representation.
+## Descriptor lifetime
+
+A retained lifetime experiment validates the intended separation between
+ownership and raster views.
+
+`RasterBacking` owns multiple independent resources plus a stable
+`PlaneDescriptor[]` block. `RasterLease` retains the backing representation,
+while `MultiPlaneRasterView` remains non-owning.
+
+Positive probes validate:
+
+- retention of multiple independent planar allocations;
+- descriptor lifetime coupled to the retained representation;
+- lease copying;
+- exactly-once final resource release;
+- allocation-free descriptor reuse across ROI;
+- safe ROI and nested-ROI use within the lease lifetime.
+
+Compile-fail probes using DIP1000 validate rejection of:
+
+- direct view return beyond a local lease;
+- ROI return beyond a local lease;
+- nested ROI return beyond a local lease;
+- assignment to a longer-lived local;
+- assignment to global state;
+- storage in an independently living heap object.
+
+Both DMD and LDC produced the expected results.
+
+ROI methods use `return scope` so lifetime provenance is preserved
+transitively through view transformations.
+
+The experiment therefore supports:
+
+```text
+retained representation
+        |
+        +-- N backing resources
+        +-- stable PlaneDescriptor[]
+        |
+        v
+    RasterLease
+        |
+        | borrow
+        v
+    RasterView
+        |
+        | return scope
+        v
+       ROI
+```
+
+`SafeRefCounted` is used by this experiment as one possible implementation
+mechanism; it is not part of the required public semantic model.
+
+Positive compile-only probes are kept under `positive/`.
+Expected compile-fail DIP1000 probes are kept under `negative/`.
+
+## Mir adaptation
+
+Mir is evaluated as an internal execution substrate rather than as the
+public raster representation.
+
+The tested adapter maps:
+
+```text
+arbitrary strided plane     -> Universal 2D
+unit x-stride plane         -> Canonical 2D
+fully contiguous plane      -> Contiguous 2D
+linearizable contiguous op  -> Contiguous 1D
+```
+
+A narrow ROI of a larger contiguous raster is correctly classified as
+Canonical rather than Contiguous.
+
+Mir adaptation remains allocation-free and preserves the RasterLease /
+DIP1000 lifetime relationship.
+
+LDC/LLVM code-generation experiments showed:
+
+```text
+Universal 2D              134 instructions
+Canonical 2D               57 instructions
+Contiguous 2D              57 instructions
+Contiguous 1D              37 instructions
+raw pointer 1D baseline    39 instructions
+```
+
+Universal generated a runtime unit-stride fast path and AVX2 vector code.
+
+Canonical and Contiguous 2D generated substantially simpler row-wise AVX2
+loops.
+
+The explicit one-dimensional Contiguous Mir path generated effectively the
+same vector hot loop as the raw-pointer baseline.
+
+This supports Mir as a zero-cost internal abstraction for the contiguous
+linear fast path while allowing RasterView to retain general two-dimensional
+semantics.
