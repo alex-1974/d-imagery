@@ -27,6 +27,9 @@ import imagery.raster.descriptor :
 import imagery.raster.resource :
     ResourceEntry;
 
+import imagery.raster.sample :
+    isRasterSampleType;
+
 import imagery.raster.validation :
     validateRasterBackingLayout;
 
@@ -52,6 +55,12 @@ import imagery.raster.view :
 package(imagery.raster)
 struct RasterBacking(T)
 {
+    static assert(
+        isRasterSampleType!T,
+        "RasterBacking sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
 private:
     ResourceEntry[] resources_;
 
@@ -89,7 +98,7 @@ public:
         void* descriptorTableAllocation,
         Region2D fullRegion
     )
-    @trusted
+    @system
     nothrow
     @nogc
     {
@@ -219,6 +228,12 @@ nothrow
 +/
 struct RasterLease(T)
 {
+    static assert(
+        isRasterSampleType!T,
+        "RasterLease sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
 private:
     RasterBackingOwner!T owner_;
 

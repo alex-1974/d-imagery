@@ -570,3 +570,61 @@ constructed RasterLease
 
 This complements the original RasterLease lifetime probes by ensuring that the
 construction boundary does not weaken the borrow relationship.
+
+## Raw construction safety boundary
+
+The package-internal retained-construction primitive is deliberately `@system`.
+
+This is not because its normal implementation is expected to perform unchecked
+memory accesses directly. It is because raw construction accepts ownership
+claims that cannot be proven from the supplied metadata alone.
+
+In particular, the primitive cannot mechanically prove:
+
+- that an opaque `releaseContext` remains alive until the eventual release;
+- that an external owner has really transferred the release obligation;
+- that source bytes semantically represent the declared sample type;
+- that an external callback obeys its documented ownership contract.
+
+A raw ResourceEntry therefore must not become an implicitly safe construction
+capability.
+
+Source-specific adapters cross this boundary explicitly after establishing
+their own source-specific invariants.
+
+The intended layering is:
+
+```text
+public/source-specific API
+        |
+        | validates representation
+        | establishes ownership/context lifetime
+        v
+small audited adapter boundary
+        |
+        | explicit @trusted / @system transition
+        v
+package raw retained construction (@system)
+        |
+        v
+RasterLease
+        |
+        v
+borrowed RasterView
+```
+
+## Raster sample representation
+
+Raster samples are raw resident values.
+
+The core therefore restricts T to representation-simple types:
+
+- unqualified;
+- POD;
+- without pointer/reference-like indirections.
+
+This permits ordinary numeric samples and simple POD pixel aggregates while
+excluding types whose copy, destruction, GC reachability, or ownership
+semantics cannot be reconstructed safely from arbitrary retained bytes.
+
+The restriction is represented by `isRasterSampleType!T`.

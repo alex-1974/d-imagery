@@ -22,6 +22,9 @@ import imagery.raster.region :
 import imagery.raster.resource :
     ResourceEntry;
 
+import imagery.raster.sample :
+    isRasterSampleType;
+
 
 /++
     Reason why a retained raster layout is not safe to publish as a validated
@@ -530,8 +533,9 @@ nothrow
 @nogc
 {
     static assert(
-        !is(T == void),
-        "Raster backing sample type may not be void."
+        isRasterSampleType!T,
+        "Raster backing sample type must be an unqualified POD value type "
+        ~ "without indirections."
     );
 
 

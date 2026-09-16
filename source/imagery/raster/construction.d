@@ -34,6 +34,9 @@ import imagery.raster.region :
 import imagery.raster.resource :
     ResourceEntry;
 
+import imagery.raster.sample :
+    isRasterSampleType;
+
 import imagery.raster.validation :
     BackingValidationResult,
     validateRasterBackingLayout;
@@ -297,8 +300,14 @@ RasterConstructionResult constructRetainedRasterWithMetadataOps(T)(
     MetadataAllocateFn allocateMetadataFn,
     MetadataFreeFn freeMetadataFn
 )
-@trusted
+@system
 {
+    static assert(
+        isRasterSampleType!T,
+        "Retained raster sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
     lease =
         RasterLease!T.init;
 
@@ -467,8 +476,14 @@ RasterConstructionResult constructRetainedRaster(T)(
     Region2D region,
     out RasterLease!T lease
 )
-@trusted
+@system
 {
+    static assert(
+        isRasterSampleType!T,
+        "Retained raster sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
     return constructRetainedRasterWithMetadataOps!T(
         resources,
         descriptors,

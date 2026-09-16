@@ -151,6 +151,52 @@ RasterLease!ubyte returnOwningLease()
 D
 
 
+cat > "$tmp_dir/safe_raw_construction.d" <<'D'
+module imagery.raster.probe_negative_safe_raw_construction;
+
+import imagery.raster.backing :
+    RasterLease;
+
+import imagery.raster.construction :
+    constructRetainedRaster;
+
+import imagery.raster.descriptor :
+    PlaneDescriptor;
+
+import imagery.raster.region :
+    Region2D;
+
+import imagery.raster.resource :
+    ResourceEntry;
+
+
+/*
+ * MUST FAIL:
+ *
+ * Raw retained construction adopts opaque physical ownership and callback
+ * state whose validity cannot be proven by @safe code.
+ *
+ * A source-specific adapter must cross this boundary explicitly through its
+ * own audited @trusted/@system implementation.
+ */
+@safe
+void rawConstructionFromSafeCode()
+{
+    ResourceEntry[] resources;
+    const(PlaneDescriptor)[] descriptors;
+
+    RasterLease!ubyte lease;
+
+    constructRetainedRaster!ubyte(
+        resources,
+        descriptors,
+        Region2D.init,
+        lease
+    );
+}
+D
+
+
 cat > "$tmp_dir/return_view.d" <<'D'
 module imagery.raster.probe_negative_return_view;
 
@@ -309,6 +355,7 @@ echo "compiler=$compiler"
 
 compile_probe positive pass
 compile_probe return_lease pass
+compile_probe safe_raw_construction reject
 compile_probe return_view reject
 compile_probe return_roi reject
 compile_probe global reject

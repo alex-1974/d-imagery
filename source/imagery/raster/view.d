@@ -23,6 +23,9 @@ import imagery.raster.descriptor :
 import imagery.raster.region :
     Region2D;
 
+import imagery.raster.sample :
+    isRasterSampleType;
+
 
 /++
     Read-only non-owning raster view.
@@ -38,6 +41,12 @@ import imagery.raster.region :
 +/
 struct RasterView(T)
 {
+    static assert(
+        isRasterSampleType!T,
+        "RasterView sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
 private:
     const(PlaneDescriptor)[] planes_;
 
