@@ -1,0 +1,74 @@
+name: Architecture Codegen
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'experiments/r0_3_raster_view/**'
+      - 'tools/codegen/**'
+      - '.github/workflows/architecture.yml'
+
+  pull_request:
+    paths:
+      - 'experiments/r0_3_raster_view/**'
+      - 'tools/codegen/**'
+      - '.github/workflows/architecture.yml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codegen:
+    name: ${{ matrix.name }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86-64 / LDC / x86-64-v3
+            os: ubuntu-24.04
+            artifact: linux-x86-64-v3
+
+          - name: Linux ARM64 / LDC
+            os: ubuntu-24.04-arm
+            artifact: linux-aarch64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install LDC
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+          dc_format: shortname
+
+      - name: Environment
+        shell: bash
+        run: |
+          echo "Runner OS:   $RUNNER_OS"
+          echo "Runner arch: $RUNNER_ARCH"
+          echo "DC:          $DC"
+          echo
+
+          ldc2 --version
+          dub --version
+
+      - name: Generate architecture code
+        shell: bash
+        run: |
+          tools/codegen/r0_3_mir_codegen.sh \
+            "artifacts/${{ matrix.artifact }}"
+
+      - name: Upload codegen artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codegen-${{ matrix.artifact }}
+          path: artifacts/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
