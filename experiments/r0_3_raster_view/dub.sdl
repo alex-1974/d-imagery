@@ -9,4 +9,4 @@ dflags "-preview=dip1000"
 
 dependency "mir-algorithm" version="~>3.0"
 
-sourceFiles "app.d"
+sourceFiles "app.d" "views.d"
