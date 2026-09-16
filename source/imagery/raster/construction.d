@@ -154,6 +154,39 @@ public:
 }
 
 
+alias MetadataAllocateFn =
+    void* function(size_t byteLength)
+    nothrow
+    @nogc;
+
+alias MetadataFreeFn =
+    void function(void* allocation)
+    nothrow
+    @nogc;
+
+
+private
+void* allocateMetadata(
+    size_t byteLength
+)
+nothrow
+@nogc
+{
+    return malloc(byteLength);
+}
+
+
+private
+void freeMetadata(
+    void* allocation
+)
+nothrow
+@nogc
+{
+    free(allocation);
+}
+
+
 /++
     Failure reason while copying one metadata table.
 +/
@@ -177,7 +210,8 @@ private
 MetadataCopyError copyMetadata(T)(
     scope const(T)[] source,
     out T[] copied,
-    out void* allocation
+    out void* allocation,
+    MetadataAllocateFn allocate
 )
 @trusted
 nothrow
@@ -206,7 +240,7 @@ nothrow
         source.length * T.sizeof;
 
     allocation =
-        malloc(byteLength);
+        allocate(byteLength);
 
     if (allocation is null)
     {
@@ -254,12 +288,14 @@ nothrow
     This function is package-internal until explicit public ownership-transfer
     adapters are designed.
 +/
-package(imagery.raster)
-RasterConstructionResult constructRetainedRaster(T)(
+private
+RasterConstructionResult constructRetainedRasterWithMetadataOps(T)(
     scope ResourceEntry[] resources,
     scope const(PlaneDescriptor)[] descriptors,
     Region2D region,
-    out RasterLease!T lease
+    out RasterLease!T lease,
+    MetadataAllocateFn allocateMetadataFn,
+    MetadataFreeFn freeMetadataFn
 )
 @trusted
 {
@@ -305,7 +341,8 @@ RasterConstructionResult constructRetainedRaster(T)(
         copyMetadata!ResourceEntry(
             resources,
             stableResources,
-            resourceTableAllocation
+            resourceTableAllocation,
+            allocateMetadataFn
         );
 
 
@@ -336,7 +373,8 @@ RasterConstructionResult constructRetainedRaster(T)(
         copyMetadata!PlaneDescriptor(
             descriptors,
             stableDescriptors,
-            descriptorTableAllocation
+            descriptorTableAllocation,
+            allocateMetadataFn
         );
 
 
@@ -348,7 +386,7 @@ RasterConstructionResult constructRetainedRaster(T)(
         case MetadataCopyError.sizeOverflow:
             if (resourceTableAllocation !is null)
             {
-                free(resourceTableAllocation);
+                freeMetadataFn(resourceTableAllocation);
             }
 
             return RasterConstructionResult(
@@ -359,7 +397,7 @@ RasterConstructionResult constructRetainedRaster(T)(
         case MetadataCopyError.allocationFailed:
             if (resourceTableAllocation !is null)
             {
-                free(resourceTableAllocation);
+                freeMetadataFn(resourceTableAllocation);
             }
 
             return RasterConstructionResult(
@@ -408,6 +446,37 @@ RasterConstructionResult constructRetainedRaster(T)(
 
 
     return RasterConstructionResult.init;
+}
+
+
+/++
+    Production entry point for transactional retained construction.
+
+    Metadata tables use malloc/free-compatible storage.
+
+    Recoverable metadata-allocation failures are returned through
+    RasterConstructionResult.
+
+    Allocation failure inside Phobos SafeRefCounted is not translated into a
+    RasterConstructionResult; that is an Error-level runtime condition.
++/
+package(imagery.raster)
+RasterConstructionResult constructRetainedRaster(T)(
+    scope ResourceEntry[] resources,
+    scope const(PlaneDescriptor)[] descriptors,
+    Region2D region,
+    out RasterLease!T lease
+)
+@trusted
+{
+    return constructRetainedRasterWithMetadataOps!T(
+        resources,
+        descriptors,
+        region,
+        lease,
+        &allocateMetadata,
+        &freeMetadata
+    );
 }
 
 
@@ -614,6 +683,218 @@ unittest
      * RefCountedAutoInitialize.no, so payload access on RasterLease.init is
      * intentionally invalid.
      */
+    assert(!lease.hasBacking);
+}
+
+
+private size_t controlledAllocationCalls;
+private size_t controlledFailureCall;
+private size_t controlledFreeCalls;
+
+
+private
+void resetControlledMetadataAllocator(
+    size_t failOnCall
+)
+nothrow
+@nogc
+{
+    controlledAllocationCalls = 0;
+    controlledFailureCall = failOnCall;
+    controlledFreeCalls = 0;
+}
+
+
+private
+void* controlledMetadataAllocate(
+    size_t byteLength
+)
+nothrow
+@nogc
+{
+    ++controlledAllocationCalls;
+
+    if (
+        controlledFailureCall != 0
+        && controlledAllocationCalls
+            == controlledFailureCall
+    )
+    {
+        return null;
+    }
+
+    return malloc(byteLength);
+}
+
+
+private
+void controlledMetadataFree(
+    void* allocation
+)
+nothrow
+@nogc
+{
+    if (allocation !is null)
+    {
+        ++controlledFreeCalls;
+        free(allocation);
+    }
+}
+
+
+unittest
+{
+    /*
+     * First metadata allocation fails.
+     *
+     * Physical ownership has already transferred into construction, so the
+     * resource must still be released exactly once.
+     *
+     * No metadata allocation exists to free.
+     */
+
+    size_t releases;
+
+    auto pixels =
+        cast(ubyte*) malloc(1);
+
+    assert(pixels !is null);
+
+
+    ResourceEntry[1] resources =
+    [
+        ResourceEntry(
+            pixels,
+            1,
+            &releases,
+            &releaseCounted
+        )
+    ];
+
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            pixels,
+            1,
+            1
+        )
+    ];
+
+
+    resetControlledMetadataAllocator(1);
+
+    RasterLease!ubyte lease;
+
+    const result =
+        constructRetainedRasterWithMetadataOps!ubyte(
+            resources[],
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                1,
+                1
+            ),
+            lease,
+            &controlledMetadataAllocate,
+            &controlledMetadataFree
+        );
+
+
+    assert(!result.ok);
+
+    assert(
+        result.error
+        == RasterConstructionError.resourceMetadataAllocationFailed
+    );
+
+    assert(controlledAllocationCalls == 1);
+    assert(controlledFreeCalls == 0);
+
+    assert(releases == 1);
+    assert(!lease.hasBacking);
+}
+
+
+unittest
+{
+    /*
+     * Resource metadata allocation succeeds, descriptor metadata allocation
+     * fails.
+     *
+     * Construction must:
+     *
+     * - free the already allocated ResourceEntry table exactly once;
+     * - release the adopted physical resource exactly once;
+     * - publish no RasterLease.
+     */
+
+    size_t releases;
+
+    auto pixels =
+        cast(ubyte*) malloc(1);
+
+    assert(pixels !is null);
+
+
+    ResourceEntry[1] resources =
+    [
+        ResourceEntry(
+            pixels,
+            1,
+            &releases,
+            &releaseCounted
+        )
+    ];
+
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            pixels,
+            1,
+            1
+        )
+    ];
+
+
+    resetControlledMetadataAllocator(2);
+
+    RasterLease!ubyte lease;
+
+    const result =
+        constructRetainedRasterWithMetadataOps!ubyte(
+            resources[],
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                1,
+                1
+            ),
+            lease,
+            &controlledMetadataAllocate,
+            &controlledMetadataFree
+        );
+
+
+    assert(!result.ok);
+
+    assert(
+        result.error
+        == RasterConstructionError.descriptorMetadataAllocationFailed
+    );
+
+    assert(controlledAllocationCalls == 2);
+
+    /*
+     * Only the first metadata allocation existed and therefore exactly one
+     * metadata free is required here.
+     */
+    assert(controlledFreeCalls == 1);
+
+    assert(releases == 1);
     assert(!lease.hasBacking);
 }
 

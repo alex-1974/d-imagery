@@ -237,11 +237,17 @@ RasterLease currently uses SafeRefCounted.
 
 SafeRefCounted allocates its own store.
 
-Construction therefore must not promise `nothrow` merely because the raster
-validation routines are `nothrow`.
+In the current Phobos implementation, the payload move allocates that store
+before moving the payload into it. The store-allocation path is `nothrow` and
+may fail only through an Error-level allocation failure.
 
-The exact out-of-memory policy remains an implementation concern and is not a
-public API guarantee at this stage.
+That condition is therefore not represented as an ordinary
+RasterConstructionResult failure.
+
+Recoverable construction failures currently cover validation and the
+d-imagery-owned metadata allocations.
+
+The public API still does not promise an out-of-memory recovery policy.
 
 ## 8. Stable metadata rule
 
