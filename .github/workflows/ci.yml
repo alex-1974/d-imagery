@@ -97,3 +97,8 @@ jobs:
         shell: bash
         run: |
           dub test
+
+      - name: Raster lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_lifetime.sh "$DC"
