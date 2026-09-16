@@ -530,3 +530,26 @@ C7  public API review
 
 The public API should be reviewed only after C1-C5 prove that the ownership
 model is mechanically sound.
+
+### Construction lifetime compile coverage
+
+C5 adds compiler-level DIP1000 probes around the actual retained-construction
+path.
+
+The probes distinguish ownership from borrowing:
+
+```text
+constructed RasterLease
+        |
+        +-- return RasterLease        -> allowed
+        |
+        +-- borrow RasterView
+                |
+                +-- local use         -> allowed
+                +-- return View       -> rejected
+                +-- return ROI        -> rejected
+                `-- global escape     -> rejected
+```
+
+This complements the original RasterLease lifetime probes by ensuring that the
+construction boundary does not weaken the borrow relationship.

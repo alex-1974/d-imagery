@@ -102,3 +102,8 @@ jobs:
         shell: bash
         run: |
           tools/compile-negative/raster_lifetime.sh "$DC"
+
+      - name: Raster construction lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_construction_lifetime.sh "$DC"
