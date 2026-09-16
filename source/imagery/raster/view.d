@@ -112,6 +112,54 @@ public:
 
 
     /++
+        Attempts to create a child region relative to this view.
+
+        `relative.x` and `relative.y` are relative to the current view origin.
+
+        On success the returned RasterView:
+
+        - reuses the exact same stable descriptor block;
+        - owns no new storage;
+        - contains the resolved absolute Region2D;
+        - remains lifetime-bound to this view.
+
+        On failure `success` is false and RasterView.init is returned.
+
+        Empty child regions are valid when they are geometrically contained
+        within the parent region.
+    +/
+    RasterView!T tryRoi(
+        Region2D relative,
+        out bool success
+    ) const
+    return scope
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        success = false;
+
+        Region2D resolved;
+
+        if (!region_.tryResolveRelative(
+            relative,
+            resolved
+        ))
+        {
+            return RasterView!T.init;
+        }
+
+        success = true;
+
+        return makeRasterViewAssumeValidated!T(
+            planes_,
+            resolved
+        );
+    }
+
+
+    /++
         Attempts to read one logical sample.
 
         Coordinates `x` and `y` are relative to this view, not absolute
@@ -216,6 +264,7 @@ RasterView!T makeRasterViewAssumeValidated(T)(
     Region2D region
 )
 @trusted
+pure
 nothrow
 @nogc
 {
@@ -714,6 +763,306 @@ unittest
 
     assert(
         !emptyView.trySample(
+            0,
+            0,
+            0,
+            value
+        )
+    );
+
+    assert(value == ubyte.init);
+}
+
+
+unittest
+{
+    /*
+     * Basic ROI:
+     *
+     * parent:
+     *
+     *      0  1  2  3
+     *     10 11 12 13
+     *     20 21 22 23
+     *
+     * relative ROI (1, 1, 2, 2):
+     *
+     *     11 12
+     *     21 22
+     */
+
+    auto parent =
+        makePlanarTestView();
+
+    bool success;
+
+    auto child =
+        parent.tryRoi(
+            Region2D(
+                1,
+                1,
+                2,
+                2
+            ),
+            success
+        );
+
+    assert(success);
+
+    assert(
+        child.region
+        == Region2D(
+            1,
+            1,
+            2,
+            2
+        )
+    );
+
+    assert(child.width == 2);
+    assert(child.height == 2);
+
+    /*
+     * ROI must reuse, not reconstruct, the descriptor block.
+     */
+    assert(
+        child.planes_.ptr
+        is parent.planes_.ptr
+    );
+
+    assert(
+        child.planes_.length
+        == parent.planes_.length
+    );
+
+
+    foreach (band; 0 .. testBands)
+    {
+        foreach (y; 0 .. child.height)
+        {
+            foreach (x; 0 .. child.width)
+            {
+                ubyte value;
+
+                assert(
+                    child.trySample(
+                        band,
+                        x,
+                        y,
+                        value
+                    )
+                );
+
+                assert(
+                    value
+                    == logicalSample(
+                        band,
+                        x + 1,
+                        y + 1
+                    )
+                );
+            }
+        }
+    }
+}
+
+
+unittest
+{
+    /*
+     * Repeated ROI transformations accumulate logical origin while retaining
+     * the exact same descriptor block.
+     */
+
+    auto root =
+        makeInterleavedTestView();
+
+    bool firstSuccess;
+
+    auto first =
+        root.tryRoi(
+            Region2D(
+                1,
+                0,
+                3,
+                3
+            ),
+            firstSuccess
+        );
+
+    assert(firstSuccess);
+
+    bool secondSuccess;
+
+    auto second =
+        first.tryRoi(
+            Region2D(
+                1,
+                1,
+                2,
+                2
+            ),
+            secondSuccess
+        );
+
+    assert(secondSuccess);
+
+    assert(
+        first.region
+        == Region2D(
+            1,
+            0,
+            3,
+            3
+        )
+    );
+
+    assert(
+        second.region
+        == Region2D(
+            2,
+            1,
+            2,
+            2
+        )
+    );
+
+    assert(
+        first.planes_.ptr
+        is root.planes_.ptr
+    );
+
+    assert(
+        second.planes_.ptr
+        is root.planes_.ptr
+    );
+
+
+    ubyte topLeft;
+    ubyte bottomRight;
+
+    assert(
+        second.trySample(
+            2,
+            0,
+            0,
+            topLeft
+        )
+    );
+
+    assert(
+        second.trySample(
+            2,
+            1,
+            1,
+            bottomRight
+        )
+    );
+
+    assert(topLeft == 212);
+    assert(bottomRight == 223);
+}
+
+
+unittest
+{
+    /*
+     * A geometrically invalid child must be rejected without producing a
+     * partially valid view.
+     */
+
+    auto parent =
+        makePlanarTestView();
+
+    bool success = true;
+
+    auto invalid =
+        parent.tryRoi(
+            Region2D(
+                3,
+                2,
+                2,
+                2
+            ),
+            success
+        );
+
+    assert(!success);
+
+    assert(invalid.planeCount == 0);
+    assert(invalid.region == Region2D.init);
+    assert(invalid.empty);
+
+
+    success = true;
+
+    auto farOutside =
+        parent.tryRoi(
+            Region2D(
+                size_t.max,
+                0,
+                1,
+                1
+            ),
+            success
+        );
+
+    assert(!success);
+
+    assert(farOutside.planeCount == 0);
+    assert(farOutside.region == Region2D.init);
+}
+
+
+unittest
+{
+    /*
+     * Empty regions are valid.
+
+     * The bottom-right boundary is one-past the final sample in both axes,
+     * but no pointer is formed or dereferenced because the child has zero
+     * logical area.
+     */
+
+    auto parent =
+        makePlanarTestView();
+
+    bool success;
+
+    auto emptyChild =
+        parent.tryRoi(
+            Region2D(
+                testWidth,
+                testHeight,
+                0,
+                0
+            ),
+            success
+        );
+
+    assert(success);
+
+    assert(emptyChild.empty);
+
+    assert(
+        emptyChild.region
+        == Region2D(
+            testWidth,
+            testHeight,
+            0,
+            0
+        )
+    );
+
+    assert(
+        emptyChild.planes_.ptr
+        is parent.planes_.ptr
+    );
+
+    ubyte value = 255;
+
+    assert(
+        !emptyChild.trySample(
             0,
             0,
             0,
