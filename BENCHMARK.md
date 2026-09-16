@@ -121,3 +121,81 @@ Correctness should remain testable with DMD.
 
 Performance measurements should include LDC/LLVM and may compare DMD where
 useful.
+
+## Reference and cross-platform benchmarking
+
+d-imagery distinguishes stable reference benchmarking from cross-platform
+validation.
+
+### Local reference platform
+
+Absolute performance measurements and historical performance comparisons
+should use a documented, stable reference machine whenever possible.
+
+The local reference platform should record at least:
+
+- CPU model and microarchitecture;
+- operating system and kernel;
+- compiler and LLVM version;
+- compiler flags;
+- thread count and CPU affinity where applicable;
+- memory configuration where relevant.
+
+This platform is the primary source for absolute timing comparisons and
+performance-regression investigation.
+
+### GitHub-hosted runners
+
+GitHub-hosted runners are used primarily for:
+
+- build and correctness portability;
+- operating-system coverage;
+- x86-64 and AArch64 coverage;
+- compiler/code-generation inspection;
+- architecture-specific optimization validation;
+- relative comparisons performed within one workflow run.
+
+Absolute elapsed times from independent hosted-runner executions must not be
+treated as stable benchmark baselines because runner hardware and system load
+are not controlled by the project.
+
+Hosted-runner timing should therefore initially be informational and
+non-gating.
+
+### Architecture policy
+
+Core design decisions must not accidentally depend on one CPU ISA.
+
+Performance-oriented implementation work should consider at least:
+
+- x86-64;
+- AArch64.
+
+Architecture-specific fast paths are permitted, but architecture-specific
+behaviour should not unnecessarily leak into the semantic raster API.
+
+In particular, conclusions based on AVX2 code generation should be checked
+against AArch64/NEON code generation when they influence general engine
+architecture.
+
+### Performance CI policy
+
+CI should distinguish:
+
+```text
+correctness / portability
+    -> blocking
+
+code-generation probes
+    -> inspectable and reproducible
+
+hosted-runner absolute timing
+    -> informational
+
+stable reference-machine timing
+    -> performance baseline
+```
+
+Relative comparisons within the same hosted runner and process may be useful
+for detecting large algorithmic differences, but they must not initially
+produce hard regression thresholds.

@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86-64 / DMD
+            os: ubuntu-24.04
+            compiler: dmd
+            experimental: false
+
+          - name: Linux x86-64 / LDC
+            os: ubuntu-24.04
+            compiler: ldc
+            experimental: false
+
+          - name: Linux ARM64 / LDC
+            os: ubuntu-24.04-arm
+            compiler: ldc
+            experimental: false
+
+          - name: Windows x86-64 / DMD
+            os: windows-2025
+            compiler: dmd
+            experimental: false
+
+          - name: Windows x86-64 / LDC
+            os: windows-2025
+            compiler: ldc
+            experimental: false
+
+          - name: macOS x86-64 / DMD
+            os: macos-15-intel
+            compiler: dmd
+            experimental: false
+
+          - name: macOS x86-64 / LDC
+            os: macos-15-intel
+            compiler: ldc
+            experimental: false
+
+          - name: macOS ARM64 / LDC
+            os: macos-15
+            compiler: ldc
+            experimental: false
+
+          - name: Windows ARM64 / LDC
+            os: windows-11-arm
+            compiler: ldc
+            experimental: true
+
+    runs-on: ${{ matrix.os }}
+
+    continue-on-error: ${{ matrix.experimental }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler }}
+          dc_format: shortname
+
+      - name: Environment
+        shell: bash
+        run: |
+          echo "Runner OS:   $RUNNER_OS"
+          echo "Runner arch: $RUNNER_ARCH"
+          echo "DC:          $DC"
+          echo
+
+          "$DC" --version || true
+          dub --version
+
+      - name: Build
+        shell: bash
+        run: |
+          dub build
+
+      - name: Test
+        shell: bash
+        run: |
+          dub test
