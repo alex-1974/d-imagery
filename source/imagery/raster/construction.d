@@ -899,4 +899,181 @@ unittest
 }
 
 
+private size_t ephemeralMetadataReleases;
+
+
+/++
+    Constructs a retained raster from metadata whose storage is local to this
+    function.
+
+    Before returning the lease, the caller-side ResourceEntry and
+    PlaneDescriptor tables are deliberately overwritten.
+
+    A valid returned RasterLease therefore proves both:
+
+    - construction copied the metadata into stable backing-owned tables;
+    - RasterLease does not retain a lifetime dependency on these local arrays.
++/
+private
+RasterLease!ubyte makeLeaseFromEphemeralMetadata()
+{
+    enum size_t width = 4;
+    enum size_t height = 3;
+    enum size_t sampleCount =
+        width * height;
+
+
+    auto pixels =
+        cast(ubyte*) malloc(sampleCount);
+
+    assert(pixels !is null);
+
+
+    foreach (index; 0 .. sampleCount)
+    {
+        pixels[index] =
+            cast(ubyte) index;
+    }
+
+
+    ResourceEntry[1] resources =
+    [
+        ResourceEntry(
+            pixels,
+            sampleCount,
+            &ephemeralMetadataReleases,
+            &releaseCounted
+        )
+    ];
+
+
+    PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            pixels,
+            width,
+            1
+        )
+    ];
+
+
+    RasterLease!ubyte lease;
+
+    const result =
+        constructRetainedRaster!ubyte(
+            resources[],
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            lease
+        );
+
+
+    assert(result.ok);
+    assert(lease.hasBacking);
+    assert(ephemeralMetadataReleases == 0);
+
+
+    /*
+     * Poison the complete caller-side metadata after construction.
+     *
+     * Any retained alias to these arrays would now break either sample access
+     * or final resource release.
+     */
+    resources[0] =
+        ResourceEntry.init;
+
+    descriptors[0] =
+        PlaneDescriptor.init;
+
+
+    return lease;
+}
+
+
+unittest
+{
+    /*
+     * The helper's metadata arrays disappear completely before this test uses
+     * the returned lease.
+     */
+
+    ephemeralMetadataReleases = 0;
+
+
+    {
+        auto lease =
+            makeLeaseFromEphemeralMetadata();
+
+        assert(lease.hasBacking);
+        assert(ephemeralMetadataReleases == 0);
+
+
+        auto view =
+            lease.view();
+
+        assert(view.planeCount == 1);
+        assert(view.width == 4);
+        assert(view.height == 3);
+
+
+        ubyte value;
+
+        assert(
+            view.trySample(
+                0,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 11);
+
+
+        /*
+         * Exercise additional addresses so the proof is not accidentally
+         * limited to one sample.
+         */
+        assert(
+            view.trySample(
+                0,
+                0,
+                0,
+                value
+            )
+        );
+
+        assert(value == 0);
+
+
+        assert(
+            view.trySample(
+                0,
+                1,
+                1,
+                value
+            )
+        );
+
+        assert(value == 5);
+
+
+        assert(ephemeralMetadataReleases == 0);
+    }
+
+
+    /*
+     * The copied ResourceEntry still carries the original release operation
+     * even though the caller's ResourceEntry was overwritten and its scope has
+     * ended.
+     */
+    assert(ephemeralMetadataReleases == 1);
+}
+
+
 } // version (unittest)

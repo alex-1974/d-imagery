@@ -268,6 +268,14 @@ After successful construction:
 - RasterView borrows only the stable backing descriptor table;
 - caller metadata storage may disappear immediately.
 
+This requirement is mechanically covered by construction tests that overwrite
+the caller-side ResourceEntry and PlaneDescriptor tables after successful
+construction and then allow their complete scope to end before using the
+returned RasterLease.
+
+The retained RasterView must continue to address the correct samples and the
+copied ResourceEntry must still release the physical resource exactly once.
+
 This is independent from the lifetime of the actual pixel resources.
 
 ## 9. Validation order
