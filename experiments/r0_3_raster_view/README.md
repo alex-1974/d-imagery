@@ -208,3 +208,52 @@ same vector hot loop as the raw-pointer baseline.
 This supports Mir as a zero-cost internal abstraction for the contiguous
 linear fast path while allowing RasterView to retain general two-dimensional
 semantics.
+
+
+## Core-type synthesis
+
+The final R0.3 synthesis separates four concerns:
+
+```text
+physical description
+lifetime ownership
+pixel access capability
+execution representation
+```
+
+The provisional physical descriptor is access-neutral:
+
+```d
+struct PlaneDescriptor
+{
+    const(void)* base;
+    ptrdiff_t rowStrideElements;
+    ptrdiff_t sampleStrideElements;
+}
+```
+
+Logical geometry is represented separately by `Region2D`.
+
+The selected access-capability model is:
+
+```text
+MutableRasterView!T
+        |
+        | O(1) read-only downgrade
+        v
+RasterView!T
+```
+
+Both view types borrow the same stable descriptor block.
+
+Positive DMD/LDC probes validate writable access, descriptor reuse and
+capability-preserving ROI.
+
+Compile-fail probes validate that read-only pixel writes and implicit
+read-only-to-writable conversion are rejected.
+
+The lifetime remains provided by the retained representation / lease rather
+than by the view itself.
+
+Mir remains an internal execution adapter and is not part of the semantic
+core API.

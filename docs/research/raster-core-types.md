@@ -3,16 +3,17 @@
 ## Status
 
 ```text
-R0.3 Raster Core Type Research                  ACTIVE
+R0.3 Raster Core Type Research                  DONE
 
-  RasterView semantic model                     ACTIVE
-  Multi-plane representation                    EXPERIMENTALLY SUPPORTED
+  RasterView semantic model                     DONE
+  Multi-plane representation                    DONE
   ROI construction cost                         DONE
   Descriptor lifetime                           DONE
   Metadata size                                 DONE
   Optimizer/codegen visibility                  DONE
   Mir adaptation                                DONE
-  Final core-type synthesis                     NEXT
+  Mutability capability model                   DONE
+  Final core-type synthesis                     DONE
 ```
 
 ## 1. Context
@@ -944,23 +945,653 @@ needed for efficient AVX2 execution.
 The contiguous one-dimensional path is effectively equivalent to the tested
 raw-pointer implementation.
 
-### Next question
+### Final core-type synthesis
 
-The next R0.3 step is final core-type synthesis.
+R0.3 selects a provisional core type architecture for d-imagery.
 
-The synthesis must turn the experimentally supported pieces into one
-coherent provisional core design:
+The purpose of this synthesis is not to freeze the final public API.
 
-- immutable versus mutable `RasterView` types;
-- exact `PlaneDescriptor` fields and stride units;
-- region/origin representation;
-- validated/trusted construction boundaries;
-- descriptor and backing-resource ownership behind `RasterLease`;
-- arbitrary-N-band representation;
-- planar and interleaved layout metadata;
-- layout classification;
-- Mir adaptation as an internal implementation detail;
-- generic, canonical and contiguous execution paths;
-- invariants required for overflow, alignment and reachable storage;
-- API boundaries that remain independent of Mir and of a specific ownership
-  implementation.
+It establishes the semantic boundaries that subsequent implementation work
+should preserve unless later experiments provide contrary evidence.
+
+The selected decomposition is:
+
+```text
+logical image / retained representation
+        |
+        +-- backing resource(s)
+        +-- stable plane descriptors
+        +-- validated storage metadata
+        +-- storage access capability
+        |
+        v
+      lease
+        |
+        v
+   RasterView
+        |
+        v
+execution classification
+        |
+        +-- generic strided
+        +-- canonical unit-X
+        +-- contiguous 2D
+        +-- contiguous 1D
+```
+
+The central R0.3 conclusion is that four concerns must remain separate:
+
+```text
+physical description
+lifetime ownership
+pixel access capability
+execution representation
+```
+
+No single type should encode all four.
+
+#### Region geometry
+
+The provisional region value type is:
+
+```d
+struct Region2D
+{
+    size_t x;
+    size_t y;
+    size_t width;
+    size_t height;
+}
+```
+
+`x` and `y` are coordinates relative to the logical origin represented by
+the retained plane descriptors.
+
+A `RasterView` therefore represents:
+
+```text
+stable descriptor block
++
+Region2D
+```
+
+ROI creation changes only `Region2D`.
+
+It does not rebuild or copy plane descriptors.
+
+Repeated ROI transforms preserve the same descriptor block and accumulate
+the logical origin.
+
+The experiments validated this behavior transitively.
+
+Empty regions are not inherently forbidden by the model.
+
+Construction and execution code must nevertheless avoid invalid pointer
+formation or dereference for empty views.
+
+#### Plane descriptor
+
+The provisional physical plane descriptor is:
+
+```d
+struct PlaneDescriptor
+{
+    const(void)* base;
+    ptrdiff_t rowStrideElements;
+    ptrdiff_t sampleStrideElements;
+}
+```
+
+`base` identifies logical sample `(0, 0)` for the plane represented by the
+descriptor.
+
+The two strides are signed because the general representation should not
+require positive physical traversal.
+
+Stride units are elements of the typed sample `T`, not bytes.
+
+This is deliberate.
+
+The raster layer works in sample coordinates, while the backing-resource
+layer works in byte extents.
+
+External byte-stride formats must therefore be validated and converted once
+at the trusted import/construction boundary.
+
+The descriptor is access-neutral.
+
+In particular:
+
+```text
+const(void)* base
+```
+
+does not assert that the underlying storage is physically immutable.
+
+It means that the descriptor itself does not grant write authority.
+
+A writable typed pointer may only be produced through the validated writable
+view path.
+
+The descriptor block becomes stable after validated publication.
+
+Views borrow it but do not own it.
+
+#### Logical band model
+
+Descriptor order is logical band order.
+
+The representation supports arbitrary positive band counts rather than
+embedding RGB or RGBA directly in the core type.
+
+Examples:
+
+```text
+planar RGB
+
+plane 0:
+    allocation R
+    sampleStride = 1
+
+plane 1:
+    allocation G
+    sampleStride = 1
+
+plane 2:
+    allocation B
+    sampleStride = 1
+```
+
+and:
+
+```text
+interleaved RGB
+
+plane 0:
+    base = pixel stream + red offset
+    sampleStride = physical pixel stride
+
+plane 1:
+    base = pixel stream + green offset
+    sampleStride = physical pixel stride
+
+plane 2:
+    base = pixel stream + blue offset
+    sampleStride = physical pixel stride
+```
+
+The semantic representation therefore does not require separate core types
+for planar and interleaved images.
+
+However, storage topology remains explicit at the retained representation /
+execution-planning level.
+
+At minimum the planner must distinguish:
+
+```text
+planar
+pixel-interleaved
+arbitrary/custom
+```
+
+This metadata must not be confused with execution layout classification.
+
+Storage topology describes relationships among bands.
+
+Execution classification describes how one current region can be traversed.
+
+#### Read-only view
+
+The selected read capability is conceptually:
+
+```d
+struct RasterView(T)
+{
+private:
+    const(PlaneDescriptor)[] planes_;
+    Region2D region_;
+}
+```
+
+Pixel access yields:
+
+```d
+const(T)*
+```
+
+or an equivalent read-only reference.
+
+The view:
+
+- owns no pixel storage;
+- owns no descriptor storage;
+- retains no resources by itself;
+- may be copied cheaply;
+- remains lifetime-bound to its originating lease/backing;
+- preserves that lifetime through ROI and adapter transformations.
+
+With the provisional fields above, the expected x86-64 payload remains the
+same fundamental shape as the experimentally measured 48-byte multi-plane
+view:
+
+```text
+descriptor slice     16 bytes
+Region2D             32 bytes
+                     --------
+                     48 bytes
+```
+
+This size observation is not an ABI promise.
+
+#### Writable view
+
+Writable access is represented by a distinct capability type:
+
+```d
+struct MutableRasterView(T)
+{
+private:
+    const(PlaneDescriptor)[] planes_;
+    Region2D region_;
+}
+```
+
+Its typed pixel access yields:
+
+```d
+T*
+```
+
+The experiments validated:
+
+```text
+MutableRasterView!T
+    -> writable pixel access
+
+MutableRasterView!T.roi(...)
+    -> MutableRasterView!T
+
+MutableRasterView!T.readOnly()
+    -> RasterView!T
+
+RasterView!T.roi(...)
+    -> RasterView!T
+
+RasterView!T pixel write
+    -> compile-time rejection
+
+RasterView!T
+    -> MutableRasterView!T
+    -> no implicit conversion
+```
+
+Mutable-to-read-only downgrade is O(1).
+
+The same stable descriptor block is reused.
+
+No reverse safe capability conversion exists.
+
+The `const(void)*` stored by `PlaneDescriptor` therefore acts as a useful
+capability boundary: raw physical metadata alone cannot create writable
+access in `@safe` code.
+
+A small trusted implementation boundary may cast that address back to `T*`
+only after writable backing storage has been validated.
+
+#### Lifetime capability
+
+Pixel-access capability and lifetime ownership remain separate.
+
+The conceptual ownership model is:
+
+```text
+RasterBacking
+        |
+        +-- resource 0
+        +-- resource 1
+        +-- ...
+        +-- stable PlaneDescriptor[]
+        +-- validated storage metadata
+        |
+        v
+retained owner
+        |
+        +--------------------------+
+        |                          |
+        v                          v
+RasterLease!T             MutableRasterLease!T
+        |                          |
+        v                          v
+RasterView!T              MutableRasterView!T
+```
+
+The exact retained-owner implementation is not part of the semantic API.
+
+`SafeRefCounted` was sufficient for the experiments but remains an
+implementation option rather than a required public type.
+
+A lease may retain:
+
+- one contiguous allocation;
+- multiple planar allocations;
+- mapped storage;
+- decoder-owned buffers;
+- cache blocks;
+- or composite resources.
+
+The lease is therefore not equivalent to one allocation.
+
+Copying a lease extends the retained representation lifetime.
+
+Views do not.
+
+A mutable lease may expose read-only capability without copying the retained
+resources.
+
+Whether the final API materializes that downgrade as a separate
+`RasterLease!T`, as another lightweight wrapper, or only as a read-only view
+is an implementation/API refinement rather than an R0.3 semantic question.
+
+#### Mutable capability is not exclusivity
+
+`MutableRasterView` means:
+
+```text
+the referenced storage may be written
+```
+
+It does not mean:
+
+```text
+this is the only writable reference to the storage
+```
+
+D does not provide Rust-style unique borrowing through this model.
+
+Therefore:
+
+```text
+lifetime safety
+write permission
+thread safety
+alias control
+synchronization
+```
+
+remain distinct concerns.
+
+Parallel execution must establish any additional non-aliasing or
+synchronization preconditions it requires.
+
+#### Trusted construction boundary
+
+Public or ordinary `@safe` code must not freely construct arbitrary validated
+views from raw pointers.
+
+A small trusted construction boundary is responsible for proving the
+invariants that make later `@safe` access valid.
+
+For each typed representation it must validate at least:
+
+1. the descriptor block remains alive for the complete lease lifetime;
+2. every plane descriptor refers to storage retained by that representation;
+3. the sample type interpretation is correct for the backing storage;
+4. base addresses satisfy the alignment requirements of `T`;
+5. row/sample stride conversion is representable;
+6. byte strides imported from external APIs are compatible with `sizeof(T)`;
+7. region coordinates and extents are representable;
+8. region containment arithmetic cannot overflow;
+9. pointer-offset arithmetic cannot overflow;
+10. every reachable sample lies inside an appropriate retained resource;
+11. negative strides, when accepted, remain inside the retained resource;
+12. `width * height` is representable before 1D linear adaptation;
+13. writable views are created only for writable retained storage;
+14. stable descriptor metadata is not modified after publication;
+15. any declared planar/interleaved layout metadata agrees with the
+    descriptors.
+
+ROI construction may rely on these established parent-view invariants.
+
+It must still perform containment checks using subtraction-based arithmetic
+rather than unchecked `x + width` style expressions.
+
+#### Resource-layer units
+
+R0.3 selects different units at different layers:
+
+```text
+RasterView / PlaneDescriptor
+    element coordinates
+    element strides
+
+Backing/resource representation
+    byte addresses
+    byte lengths
+```
+
+This keeps typed pixel traversal simple and matches the internal Mir mapping.
+
+Conversion from byte-oriented external formats is paid once during validated
+construction rather than repeatedly inside hot kernels.
+
+#### Storage topology versus execution layout
+
+These are separate concepts.
+
+Storage topology answers:
+
+```text
+How are logical bands physically related?
+```
+
+Examples:
+
+```text
+planar
+pixel-interleaved
+custom/composite
+```
+
+Execution layout answers:
+
+```text
+How may this particular plane/region be traversed efficiently?
+```
+
+The tested execution classes are:
+
+```text
+arbitrary sample stride
+    -> Universal 2D
+
+unit X stride
+    -> Canonical 2D
+
+unit X stride + rowStride == region width
+    -> Contiguous 2D
+
+fully contiguous + semantically linearizable operation
+    -> Contiguous 1D
+```
+
+A planar plane may be Canonical or Contiguous.
+
+An interleaved logical band may be Universal.
+
+A narrow ROI cut from a contiguous source may become Canonical rather than
+Contiguous.
+
+Therefore the two classifications must never be collapsed into one enum.
+
+#### Multi-band execution
+
+The experiments also demonstrated that representing RGB as three logical
+planes must not force execution as three independent physical streams.
+
+For pixel-interleaved storage the execution planner should classify the
+shared physical layout and select a physical-stream kernel where appropriate.
+
+The preferred execution relationship is:
+
+```text
+logical multi-plane view
+        |
+        v
+layout/topology classifier
+        |
+        +-- planar contiguous
+        |       -> independent linear band streams
+        |
+        +-- pixel-interleaved RGB/RGBA
+        |       -> shared physical stream kernel
+        |
+        +-- arbitrary strided
+                -> generic logical-plane kernel
+```
+
+Logical representation and physical kernel schedule are therefore separate.
+
+#### Internal Mir boundary
+
+Mir remains internal.
+
+The public/core semantic model is:
+
+```text
+RasterView
+PlaneDescriptor
+Region2D
+RasterLease
+```
+
+not:
+
+```text
+mir.ndslice.Slice
+```
+
+The adapter boundary is:
+
+```text
+validated RasterView
+        |
+        v
+small internal adapter
+        |
+        +-- Universal 2D
+        +-- Canonical 2D
+        +-- Contiguous 2D
+        +-- Contiguous 1D
+        |
+        v
+kernel
+```
+
+The adapter is O(1) and allocation-free.
+
+The lifetime experiments demonstrated that adapted Mir slices remain bound to
+their originating view/lease.
+
+The code-generation experiment demonstrated that the 1D Contiguous Mir path
+produced effectively the same AVX2 hot loop as the raw-pointer baseline on
+LDC 1.41 / LLVM 19.1.7.
+
+Mir is therefore accepted as an internal implementation substrate, not as a
+public API dependency.
+
+#### Provisional core relationship
+
+The R0.3 target architecture is:
+
+```text
+                         retained representation
+                                  |
+             +--------------------+--------------------+
+             |                    |                    |
+             v                    v                    v
+     backing resources     stable descriptors    storage metadata
+             |                    |                    |
+             +--------------------+--------------------+
+                                  |
+                          retained lifetime
+                                  |
+                    +-------------+-------------+
+                    |                           |
+                    v                           v
+             RasterLease!T             MutableRasterLease!T
+                    |                           |
+                    v                           v
+             RasterView!T              MutableRasterView!T
+                    ^                           |
+                    |                           |
+                    +------- read downgrade ----+
+                                  |
+                                  v
+                          Region transformations
+                                  |
+                                  v
+                         execution classifier
+                                  |
+               +------------------+------------------+
+               |                  |                  |
+               v                  v                  v
+           Universal         Canonical          Contiguous
+                                                  |
+                                                  +-- 2D
+                                                  |
+                                                  +-- 1D when linearizable
+```
+
+#### What R0.3 deliberately does not decide
+
+The following remain outside the R0.3 core-type decision:
+
+- final public naming;
+- exact public constructor/factory naming;
+- concrete reference-count implementation;
+- cache ownership policy;
+- task scheduling;
+- thread synchronization;
+- exclusive writable borrowing;
+- GPU representation;
+- SIMD/FMA policy;
+- concrete RGB/RGBA convenience wrappers;
+- dynamic runtime sample-format dispatch;
+- file-format-specific metadata;
+- georeferencing metadata.
+
+These can be layered on the selected core semantics.
+
+#### R0.3 conclusion
+
+R0.3 supports a general non-owning multi-plane raster view as the semantic
+core.
+
+The selected design is characterized by:
+
+```text
+stable borrowed plane descriptors
+arbitrary-N-band support
+explicit region geometry
+allocation-free ROI
+separate retained lifetime
+separate read/write capability
+explicit storage topology outside the hot view
+layout classification before execution
+Mir as an internal adapter
+generic plus specialized execution paths
+```
+
+The experiments do not support replacing this model with:
+
+- one universal fixed tile type;
+- an RGB-specific core representation;
+- a Mir type as the public raster API;
+- ownership embedded directly inside every view;
+- or one generic runtime-stride kernel for all layouts.
+
+R0.3 is therefore complete.
+
+The next research/implementation phase should translate this provisional
+semantic model into the first production core implementation and validate it
+against real source/backing adapters.
