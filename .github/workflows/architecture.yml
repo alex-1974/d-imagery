@@ -66,7 +66,7 @@ jobs:
             "artifacts/${{ matrix.artifact }}"
 
       - name: Upload codegen artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codegen-${{ matrix.artifact }}
           path: artifacts/${{ matrix.artifact }}
