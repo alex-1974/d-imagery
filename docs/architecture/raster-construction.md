@@ -343,6 +343,27 @@ One logical plane may reference one retained resource.
 Multiple logical planes may also reference the same retained resource, as in
 pixel-interleaved RGB/RGBA.
 
+Both topology classes are mechanically covered by construction tests:
+
+```text
+planar
+    Plane 0 -> Resource A
+    Plane 1 -> Resource B
+    Plane 2 -> Resource C
+
+pixel-interleaved
+    Plane 0 --+
+    Plane 1 --+--> Resource A
+    Plane 2 --+
+```
+
+The planar case verifies independent exact-once releases for all retained
+resources.
+
+The shared-resource case verifies that several PlaneDescriptors may address
+different affine streams inside one resource while the underlying physical
+resource is released only once.
+
 The validator determines address coverage; construction does not infer
 one-resource-per-plane semantics.
 

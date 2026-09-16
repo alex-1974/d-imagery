@@ -1076,4 +1076,395 @@ unittest
 }
 
 
+unittest
+{
+    /*
+     * Planar topology:
+     *
+     * three logical planes backed by three independent physical resources.
+     *
+     * Every resource must:
+     *
+     * - remain retained while RasterLease exists;
+     * - feed the correct logical band;
+     * - be released exactly once when the final lease disappears.
+     */
+
+    enum size_t width = 4;
+    enum size_t height = 3;
+    enum size_t sampleCount =
+        width * height;
+
+
+    size_t[3] releases;
+
+
+    auto plane0 =
+        cast(ubyte*) malloc(sampleCount);
+
+    auto plane1 =
+        cast(ubyte*) malloc(sampleCount);
+
+    auto plane2 =
+        cast(ubyte*) malloc(sampleCount);
+
+
+    assert(plane0 !is null);
+    assert(plane1 !is null);
+    assert(plane2 !is null);
+
+
+    foreach (index; 0 .. sampleCount)
+    {
+        plane0[index] =
+            cast(ubyte)(index);
+
+        plane1[index] =
+            cast(ubyte)(100 + index);
+
+        plane2[index] =
+            cast(ubyte)(200 + index);
+    }
+
+
+    ResourceEntry[3] resources =
+    [
+        ResourceEntry(
+            plane0,
+            sampleCount,
+            &releases[0],
+            &releaseCounted
+        ),
+
+        ResourceEntry(
+            plane1,
+            sampleCount,
+            &releases[1],
+            &releaseCounted
+        ),
+
+        ResourceEntry(
+            plane2,
+            sampleCount,
+            &releases[2],
+            &releaseCounted
+        )
+    ];
+
+
+    PlaneDescriptor[3] descriptors =
+    [
+        PlaneDescriptor(
+            plane0,
+            width,
+            1
+        ),
+
+        PlaneDescriptor(
+            plane1,
+            width,
+            1
+        ),
+
+        PlaneDescriptor(
+            plane2,
+            width,
+            1
+        )
+    ];
+
+
+    {
+        RasterLease!ubyte lease;
+
+        const result =
+            constructRetainedRaster!ubyte(
+                resources[],
+                descriptors[],
+                Region2D(
+                    0,
+                    0,
+                    width,
+                    height
+                ),
+                lease
+            );
+
+
+        assert(result.ok);
+        assert(lease.hasBacking);
+
+        assert(releases == [0, 0, 0]);
+
+
+        /*
+         * Caller-side metadata no longer matters after construction.
+         */
+        foreach (ref resource; resources)
+        {
+            resource =
+                ResourceEntry.init;
+        }
+
+        foreach (ref descriptor; descriptors)
+        {
+            descriptor =
+                PlaneDescriptor.init;
+        }
+
+
+        auto view =
+            lease.view();
+
+        assert(view.planeCount == 3);
+
+
+        ubyte value;
+
+
+        assert(
+            view.trySample(
+                0,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 11);
+
+
+        assert(
+            view.trySample(
+                1,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 111);
+
+
+        assert(
+            view.trySample(
+                2,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 211);
+
+
+        assert(releases == [0, 0, 0]);
+    }
+
+
+    assert(releases == [1, 1, 1]);
+}
+
+
+unittest
+{
+    /*
+     * Pixel-interleaved topology:
+     *
+     * three logical planes share one retained physical resource.
+     *
+     * Plane descriptors differ only by their starting byte while sharing:
+     *
+     *     rowStrideElements    = width * 3
+     *     sampleStrideElements = 3
+     *
+     * The one physical resource must be released exactly once, not once per
+     * logical plane.
+     */
+
+    enum size_t width = 4;
+    enum size_t height = 3;
+    enum size_t channelCount = 3;
+
+    enum size_t sampleCount =
+        width * height * channelCount;
+
+
+    size_t releases;
+
+
+    auto pixels =
+        cast(ubyte*) malloc(sampleCount);
+
+    assert(pixels !is null);
+
+
+    foreach (y; 0 .. height)
+    {
+        foreach (x; 0 .. width)
+        {
+            const pixel =
+                (y * width + x)
+                * channelCount;
+
+            pixels[pixel + 0] =
+                cast(ubyte)(
+                    y * 10 + x
+                );
+
+            pixels[pixel + 1] =
+                cast(ubyte)(
+                    100 + y * 10 + x
+                );
+
+            pixels[pixel + 2] =
+                cast(ubyte)(
+                    200 + y * 10 + x
+                );
+        }
+    }
+
+
+    ResourceEntry[1] resources =
+    [
+        ResourceEntry(
+            pixels,
+            sampleCount,
+            &releases,
+            &releaseCounted
+        )
+    ];
+
+
+    PlaneDescriptor[3] descriptors =
+    [
+        PlaneDescriptor(
+            pixels + 0,
+            width * channelCount,
+            channelCount
+        ),
+
+        PlaneDescriptor(
+            pixels + 1,
+            width * channelCount,
+            channelCount
+        ),
+
+        PlaneDescriptor(
+            pixels + 2,
+            width * channelCount,
+            channelCount
+        )
+    ];
+
+
+    {
+        RasterLease!ubyte lease;
+
+        const result =
+            constructRetainedRaster!ubyte(
+                resources[],
+                descriptors[],
+                Region2D(
+                    0,
+                    0,
+                    width,
+                    height
+                ),
+                lease
+            );
+
+
+        assert(result.ok);
+        assert(lease.hasBacking);
+
+        assert(releases == 0);
+
+
+        /*
+         * Poison caller metadata to ensure the retained representation uses its
+         * own stable copies.
+         */
+        resources[0] =
+            ResourceEntry.init;
+
+        foreach (ref descriptor; descriptors)
+        {
+            descriptor =
+                PlaneDescriptor.init;
+        }
+
+
+        auto view =
+            lease.view();
+
+        assert(view.planeCount == 3);
+
+
+        ubyte value;
+
+
+        assert(
+            view.trySample(
+                0,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 23);
+
+
+        assert(
+            view.trySample(
+                1,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 123);
+
+
+        assert(
+            view.trySample(
+                2,
+                3,
+                2,
+                value
+            )
+        );
+
+        assert(value == 223);
+
+
+        /*
+         * Additional coordinate to ensure the three affine streams remain
+         * correctly interleaved over more than one pixel.
+         */
+        assert(
+            view.trySample(
+                2,
+                1,
+                1,
+                value
+            )
+        );
+
+        assert(value == 211);
+
+
+        assert(releases == 0);
+    }
+
+
+    /*
+     * One shared physical allocation means one release obligation.
+     */
+    assert(releases == 1);
+}
+
+
 } // version (unittest)
