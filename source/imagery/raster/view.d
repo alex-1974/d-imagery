@@ -3,7 +3,7 @@
 
     RasterView separates:
 
-    - logical region geometry;
+    - resident region geometry;
     - physical plane description;
     - storage ownership;
     - execution representation.
@@ -23,17 +23,30 @@ import imagery.raster.descriptor :
 import imagery.raster.region :
     Region2D;
 
+import imagery.raster.sample :
+    isRasterSampleType;
+
 
 /++
     Read-only non-owning raster view.
 
     Plane order is logical band order.
 
-    The region coordinates are relative to the logical origins represented by
-    the stable plane descriptors.
+    The region coordinates belong to the resident coordinate system defined
+    by the stable plane descriptors.
+
+    They are not global LogicalImage coordinates.
+
+    PlaneDescriptor.base represents resident descriptor coordinate `(0, 0)`.
 +/
 struct RasterView(T)
 {
+    static assert(
+        isRasterSampleType!T,
+        "RasterView sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
 private:
     const(PlaneDescriptor)[] planes_;
 
@@ -56,7 +69,7 @@ public:
 
 
     /++
-        Logical region represented by this view.
+        Resident descriptor-space region represented by this view.
     +/
     @property
     Region2D region() const
@@ -70,7 +83,7 @@ public:
 
 
     /++
-        Logical width of this view.
+        Resident width of this view.
     +/
     @property
     size_t width() const
@@ -84,7 +97,7 @@ public:
 
 
     /++
-        Logical height of this view.
+        Resident height of this view.
     +/
     @property
     size_t height() const
@@ -98,7 +111,7 @@ public:
 
 
     /++
-        Whether this view has zero logical area.
+        Whether this view has zero resident area.
     +/
     @property
     bool empty() const
@@ -120,7 +133,8 @@ public:
 
         - reuses the exact same stable descriptor block;
         - owns no new storage;
-        - contains the resolved absolute Region2D;
+        - contains the resolved Region2D in the same resident descriptor
+          coordinate system;
         - remains lifetime-bound to this view.
 
         On failure `success` is false and RasterView.init is returned.
@@ -162,8 +176,10 @@ public:
     /++
         Attempts to read one logical sample.
 
-        Coordinates `x` and `y` are relative to this view, not absolute
-        descriptor coordinates.
+        Coordinates `x` and `y` are relative to this view.
+
+        Internally they resolve into resident descriptor-space coordinates.
+        They are never interpreted as global LogicalImage coordinates.
 
         Returns false when the band or coordinates are outside the view.
 
@@ -212,7 +228,7 @@ public:
          *
          * That boundary must prove that:
          *
-         * - absolute coordinates are representable;
+         * - resident descriptor coordinates are representable;
          * - conversion to ptrdiff_t is representable;
          * - both stride products are representable;
          * - their sum is representable;
@@ -220,17 +236,17 @@ public:
          * - negative strides remain inside retained storage.
          */
 
-        const absoluteX =
+        const descriptorX =
             region_.x + x;
 
-        const absoluteY =
+        const descriptorY =
             region_.y + y;
 
         const signedX =
-            cast(ptrdiff_t) absoluteX;
+            cast(ptrdiff_t) descriptorX;
 
         const signedY =
-            cast(ptrdiff_t) absoluteY;
+            cast(ptrdiff_t) descriptorY;
 
         const offset =
               signedY * descriptor.rowStrideElements

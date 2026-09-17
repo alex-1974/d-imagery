@@ -27,6 +27,9 @@ import imagery.raster.descriptor :
 import imagery.raster.resource :
     ResourceEntry;
 
+import imagery.raster.sample :
+    isRasterSampleType;
+
 import imagery.raster.validation :
     validateRasterBackingLayout;
 
@@ -52,6 +55,12 @@ import imagery.raster.view :
 package(imagery.raster)
 struct RasterBacking(T)
 {
+    static assert(
+        isRasterSampleType!T,
+        "RasterBacking sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
 private:
     ResourceEntry[] resources_;
 
@@ -65,6 +74,49 @@ private:
 
 public:
     @disable this(this);
+
+
+    /++
+        Package-internal ownership constructor.
+
+        The supplied metadata allocations and physical resources are already
+        validated and owned by the construction layer.
+
+        After this constructor returns, this RasterBacking is responsible for:
+
+        - every ResourceEntry release obligation;
+        - resourceTableAllocation;
+        - descriptorTableAllocation.
+
+        This is not a public raw-pointer construction API.
+    +/
+    package(imagery.raster)
+    this(
+        ResourceEntry[] resources,
+        PlaneDescriptor[] descriptors,
+        void* resourceTableAllocation,
+        void* descriptorTableAllocation,
+        Region2D fullRegion
+    )
+    @system
+    nothrow
+    @nogc
+    {
+        resources_ =
+            resources;
+
+        descriptors_ =
+            descriptors;
+
+        resourceTableAllocation_ =
+            resourceTableAllocation;
+
+        descriptorTableAllocation_ =
+            descriptorTableAllocation;
+
+        fullRegion_ =
+            fullRegion;
+    }
 
 
     /++
@@ -118,6 +170,32 @@ private alias RasterBackingOwner(T) =
 
 
 /++
+    Commits an already validated RasterBacking into reference-counted retained
+    ownership and returns its public lifetime capability.
+
+    This is the final ownership transition used by the construction layer.
+
+    Deliberately not declared `nothrow`: creation of the SafeRefCounted store is
+    an allocation boundary.
++/
+package(imagery.raster)
+RasterLease!T retainRasterBacking(T)(
+    RasterBacking!T backing
+)
+@trusted
+{
+    auto owner =
+        safeRefCounted(
+            move(backing)
+        );
+
+    return RasterLease!T(
+        move(owner)
+    );
+}
+
+
+/++
     Converts an already retained and validated backing into its semantic
     non-owning RasterView.
 
@@ -150,6 +228,12 @@ nothrow
 +/
 struct RasterLease(T)
 {
+    static assert(
+        isRasterSampleType!T,
+        "RasterLease sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
 private:
     RasterBackingOwner!T owner_;
 
@@ -163,6 +247,24 @@ private:
     }
 
 public:
+
+    /++
+        Returns true when this lease currently retains a RasterBacking.
+
+        Package-internal construction/control-plane query.
+
+        This deliberately checks the SafeRefCounted store without accessing
+        its payload, so RasterLease.init can be inspected safely.
+    +/
+    package(imagery.raster)
+    @property
+    bool hasBacking() const
+    @safe
+    nothrow
+    {
+        return owner_.refCountedStore.isInitialized;
+    }
+
 
     /++
         Returns a non-owning read-only RasterView borrowing from this lease.

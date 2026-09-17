@@ -5,7 +5,7 @@
 
     - byte-oriented retained resources;
     - element-oriented PlaneDescriptor metadata;
-    - logical Region2D geometry;
+    - resident descriptor-space Region2D geometry;
     - the typed sample T.
 
     Validation is performed once at a backing-construction boundary so normal
@@ -21,6 +21,9 @@ import imagery.raster.region :
 
 import imagery.raster.resource :
     ResourceEntry;
+
+import imagery.raster.sample :
+    isRasterSampleType;
 
 
 /++
@@ -420,8 +423,8 @@ nothrow
 
 
     /*
-     * Deliberately require the descriptor's logical origin itself to be
-     * located inside its retained resource.
+     * Deliberately require descriptor-space coordinate `(0, 0)` itself to
+     * be located inside its retained resource.
      *
      * ROI does not rewrite this pointer; only Region2D changes.
      */
@@ -504,7 +507,8 @@ nothrow
 
     - at least one logical plane exists;
     - Region2D endpoint arithmetic is representable in size_t;
-    - every reachable absolute sample coordinate is representable in ptrdiff_t;
+    - every reachable resident descriptor coordinate is representable in
+      ptrdiff_t;
     - retained resource byte ranges are representable;
     - non-empty planes have non-null, T-aligned bases;
     - coordinate/stride products fit ptrdiff_t;
@@ -529,8 +533,9 @@ nothrow
 @nogc
 {
     static assert(
-        !is(T == void),
-        "Raster backing sample type may not be void."
+        isRasterSampleType!T,
+        "Raster backing sample type must be an unqualified POD value type "
+        ~ "without indirections."
     );
 
 
@@ -592,12 +597,12 @@ nothrow
 
 
     /*
-     * RasterView.trySample() converts absolute x/y coordinates to ptrdiff_t
-     * before applying element strides.
+     * RasterView.trySample() converts resident descriptor-space x/y
+     * coordinates to ptrdiff_t before applying element strides.
      *
      * Consequently coordinate representation is an independent invariant:
      * zero or negative strides do not permit an otherwise unrepresentable
-     * absolute coordinate.
+     * resident coordinate.
      *
      * region is known to be non-empty here and hasRepresentableExtent()
      * already proved the size_t endpoint arithmetic.
@@ -1180,8 +1185,8 @@ unittest
 unittest
 {
     /*
-     * Absolute sample coordinates themselves must fit ptrdiff_t because
-     * RasterView.trySample() casts them before applying strides.
+     * Resident descriptor-space coordinates themselves must fit ptrdiff_t
+     * because RasterView.trySample() casts them before applying strides.
      *
      * Zero stride deliberately verifies that coordinate representation is
      * checked independently of multiplication.
@@ -1234,8 +1239,8 @@ unittest
 unittest
 {
     /*
-     * Here the absolute coordinate itself is representable, but multiplying
-     * it by sampleStrideElements is not.
+     * Here the resident descriptor coordinate itself is representable, but
+     * multiplying it by sampleStrideElements is not.
      */
 
     ubyte sample;
@@ -1396,6 +1401,127 @@ unittest
         );
 
     assert(result.ok);
+}
+
+
+unittest
+{
+    /*
+     * RasterBacking validation operates in resident descriptor coordinates,
+     * not in global LogicalImage coordinates.
+     *
+     * A tiny 4 x 3 resident block therefore uses a local region even if a
+     * higher layer places that block very far inside a logical image.
+     */
+
+    ubyte[12] samples;
+
+    const resources =
+    [
+        ResourceEntry(
+            samples.ptr,
+            samples.length,
+            null,
+            null
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+
+    const residentRegion =
+        Region2D(
+            0,
+            0,
+            4,
+            3
+        );
+
+    const globalPlacement =
+        Region2D(
+            100_000,
+            200_000,
+            4,
+            3
+        );
+
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            residentRegion
+        ).ok
+    );
+
+
+    /*
+     * Passing the higher-level global placement directly as resident geometry
+     * would require a huge physical prefix that this 12-byte resource does not
+     * contain.
+     *
+     * This is deliberately invalid.
+     */
+    assert(
+        !validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            globalPlacement
+        ).ok
+    );
+}
+
+
+unittest
+{
+    /*
+     * Resident descriptor coordinates are not required to start at zero.
+     *
+     * This models a retained resource that contains padding, halo, or another
+     * physical prefix before the visible resident region.
+     */
+
+    ubyte[30] samples;
+
+    const resources =
+    [
+        ResourceEntry(
+            samples.ptr,
+            samples.length,
+            null,
+            null
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            6,
+            1
+        )
+    ];
+
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            Region2D(
+                1,
+                1,
+                4,
+                3
+            )
+        ).ok
+    );
 }
 
 
