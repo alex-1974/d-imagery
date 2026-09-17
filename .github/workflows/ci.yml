@@ -112,3 +112,8 @@ jobs:
         shell: bash
         run: |
           tools/compile-negative/raster_owned_resource.sh "$DC"
+
+      - name: Raster public-import compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_import_public.sh "$DC"

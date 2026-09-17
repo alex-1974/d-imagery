@@ -1411,3 +1411,87 @@ state unambiguous.
 The public `OwnedRasterImportResult` should expose its state through read-only
 properties. Construction of arbitrary error/disposition combinations should
 remain internal to the raster package.
+
+## C6.5 implementation: public owned-raster import
+
+C6.5 implements the public single-resource retained-import surface defined by
+C6.4 and corrected by C6.4a.
+
+The exported API is:
+
+```d
+enum OwnedRasterImportError;
+
+enum OwnedRasterResourceDisposition;
+
+struct OwnedRasterImportResult;
+
+OwnedRasterImportResult tryImportOwnedRaster(T)(
+    ref OwnedByteResource resource,
+    scope const(PlaneByteLayout)[] planes,
+    Region2D residentRegion,
+    ref RasterLease!T lease
+)
+@safe;
+```
+
+### Safety layering
+
+The public call path is:
+
+```text
+public @safe tryImportOwnedRaster()
+        |
+        | public/internal result mapping only
+        v
+package @trusted importSingleOwnedResource()
+        |
+        v
+private @system transactional implementation
+```
+
+No new public trusted or system boundary is introduced.
+
+### Result construction
+
+OwnedRasterImportResult fields are private.
+
+Its `.init` state deliberately represents a non-successful internal failure
+with unchanged resource disposition.
+
+Only the raster import module constructs successful or ownership-changing
+results.
+
+Consequently callers cannot fabricate contradictory combinations such as:
+
+```text
+error == none
+resourceDisposition == unchanged
+```
+
+### Explicit disposition
+
+The public mapper constructs error and resource disposition together.
+
+In particular the same public error category may carry different dispositions:
+
+```text
+internalConstructionFailure + unchanged
+
+internalConstructionFailure + releasedAfterCommit
+```
+
+depending on which side of the ownership commit point the internal failure
+occurred.
+
+### Public compile guarantees
+
+C6.5 adds compiler probes establishing that:
+
+- `@safe` code can call tryImportOwnedRaster when given an
+  OwnedByteResource;
+- package-internal SingleResourceRasterImport types are not exported through
+  imagery.raster;
+- public callers cannot mutate the private result state.
+
+These probes run under both DMD and LDC in CI.
