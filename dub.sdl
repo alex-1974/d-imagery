@@ -9,3 +9,5 @@ targetType "library"
 sourcePaths "source"
 
 dflags "-preview=dip1000"
+
+dependency "mir-algorithm" version="~>3.22.4"

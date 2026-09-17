@@ -825,3 +825,29 @@ internal execution representation
         v
 scalar / SIMD / later parallel execution
 ```
+
+## E2 implementation validation baseline
+
+The initial production Mir execution adapter was validated against:
+
+- `mir-algorithm 3.22.4`;
+- `mir-core 1.7.4`;
+- DMD with `-preview=dip1000`;
+- LDC with `-preview=dip1000`.
+
+The root package declares `mir-algorithm ~>3.22.4`; Mir remains an internal
+execution substrate and is not part of the public semantic raster API.
+
+The validated adapter properties include:
+
+- `Slice!(const(T)*, 2, Universal)`;
+- `Slice!(const(T)*, 2, Canonical)`;
+- `Slice!(const(T)*, 2, Contiguous)`;
+- `Slice!(const(T)*, 1, Contiguous)`;
+- negative outer Canonical strides;
+- empty Universal slices using a null iterator;
+- read-only element access;
+- DIP1000 rejection of a Mir slice escaping a local `RasterLease`.
+
+`dub.selections.json` remains a local DUB resolution artifact for this library
+and is not part of the repository contract.

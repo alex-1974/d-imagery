@@ -168,6 +168,113 @@ public:
 
 
     /++
+        Attempts to expose the signed physical strides required by an
+        internal execution adapter.
+
+        This does not expose PlaneDescriptor itself and grants no pixel access.
+
+        On failure both output strides are reset to zero.
+    +/
+    package(imagery.raster)
+    bool tryExecutionPlaneStrides(
+        size_t planeIndex,
+        out ptrdiff_t rowStrideElements,
+        out ptrdiff_t sampleStrideElements
+    ) const
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        rowStrideElements = 0;
+        sampleStrideElements = 0;
+
+        if (planeIndex >= planes_.length)
+        {
+            return false;
+        }
+
+        rowStrideElements =
+            planes_[planeIndex].rowStrideElements;
+
+        sampleStrideElements =
+            planes_[planeIndex].sampleStrideElements;
+
+        return true;
+    }
+
+
+    /++
+        Resolves the first logical sample of one plane in the current
+        RasterView region.
+
+        This is the single trusted pointer-formation boundary used by the
+        execution-adapter layer.
+
+        For an empty RasterView this returns null before performing any
+        coordinate conversion or pointer arithmetic.
+
+        For a non-empty RasterView, construction-time validation has already
+        proved that:
+
+        - the plane index refers to stable descriptor metadata;
+        - the descriptor base is non-null and correctly aligned;
+        - region x/y coordinates are representable as ptrdiff_t;
+        - both coordinate/stride products are representable;
+        - their sum is representable;
+        - the resulting sample remains inside retained storage.
+
+        The returned pointer remains read-only and lifetime-bound to this
+        RasterView borrow.
+    +/
+    package(imagery.raster)
+    const(T)* executionRegionBase(
+        size_t planeIndex
+    ) const
+    return scope
+    @trusted
+    nothrow
+    @nogc
+    {
+        assert(planeIndex < planes_.length);
+
+        /*
+         * Critical E2 invariant:
+         *
+         * empty views do not require their descriptor-space origin to be
+         * ptrdiff_t-representable because no sample is reachable.
+         *
+         * Therefore this branch must precede all coordinate casts and
+         * pointer arithmetic.
+         */
+        if (region_.empty())
+        {
+            return null;
+        }
+
+        const descriptor =
+            planes_[planeIndex];
+
+        assert(descriptor.base !is null);
+
+        const signedX =
+            cast(ptrdiff_t) region_.x;
+
+        const signedY =
+            cast(ptrdiff_t) region_.y;
+
+        const offset =
+              signedY * descriptor.rowStrideElements
+            + signedX * descriptor.sampleStrideElements;
+
+        const base =
+            cast(const(T)*) descriptor.base;
+
+        return base + offset;
+    }
+
+
+    /++
         Attempts to create a child region relative to this view.
 
         `relative.x` and `relative.y` are relative to the current view origin.
