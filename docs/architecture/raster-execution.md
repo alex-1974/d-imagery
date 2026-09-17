@@ -931,3 +931,37 @@ General padded, strided, negative-stride, ROI, and multi-plane target semantics
 are deliberately not claimed by this baseline. They can be added as separately
 validated construction capabilities without weakening the read-only
 `RasterView` contract.
+
+## E3c scalar pointwise copy baseline
+
+E3c introduces the first scalar source-to-target execution kernel.
+
+The initial operation is exact same-sample-type copy:
+
+    read-only source -> writable contiguous target
+
+Supported source execution layouts are:
+
+- Universal 2D;
+- Canonical 2D;
+- Contiguous 2D;
+- flat Contiguous 1D.
+
+The target remains the contiguous writable E3b baseline.
+
+Numeric conversion is deliberately excluded from this first pointwise
+contract. Defining conversion would require explicit choices for narrowing,
+rounding, saturation, and floating-point/integer behavior rather than merely
+testing execution topology.
+
+Two-dimensional and flat kernels validate shape equality before the first
+target write. A shape mismatch therefore leaves the target unchanged.
+
+Source/target overlap is not guaranteed by the E3c baseline. The execution
+layer currently promises correct copy semantics only when the caller's alias
+policy makes the traversal valid. Exact overlap, partial overlap, and later
+parallel/SIMD alias requirements remain separate operation/execution-policy
+concerns.
+
+The scalar copy kernels are the pointwise correctness reference for later fast
+paths and code-generation inspection.
