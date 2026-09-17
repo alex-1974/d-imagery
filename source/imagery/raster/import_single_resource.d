@@ -46,6 +46,10 @@ import imagery.raster.region :
 import imagery.raster.resource :
     ResourceEntry;
 
+import imagery.raster.validation :
+    BackingValidationResult,
+    validateRasterBackingLayout;
+
 import imagery.raster.sample :
     isRasterSampleType;
 
@@ -71,6 +75,8 @@ enum SingleResourceRasterImportError : ubyte
 
     planeLayoutConversionFailed,
 
+    backingValidationFailed,
+
     retainedConstructionFailed
 }
 
@@ -94,6 +100,9 @@ struct SingleResourceRasterImportResult
 
     PlaneByteLayoutConversionError layoutError =
         PlaneByteLayoutConversionError.none;
+
+    BackingValidationResult validation;
+
 
     RasterConstructionError constructionError =
         RasterConstructionError.none;
@@ -252,6 +261,7 @@ SingleResourceRasterImportResult importSingleOwnedResource(T)(
                 SingleResourceRasterImportError.planeLayoutConversionFailed,
                 planeIndex,
                 conversion.error,
+                BackingValidationResult.init,
                 RasterConstructionError.none
             );
         }
@@ -259,6 +269,55 @@ SingleResourceRasterImportResult importSingleOwnedResource(T)(
 
         descriptors[planeIndex] =
             descriptor;
+    }
+
+
+    /*
+     * COMPLETE PRE-COMMIT BACKING VALIDATION
+     *
+     * The validator needs only retained byte-range metadata for physical
+     * reachability. Release policy is explicitly outside its responsibility.
+     *
+     * Therefore construct a temporary validation-only ResourceEntry with no
+     * release callback. It carries no ownership obligation.
+     *
+     * resourceBase originated from the armed OwnedByteResource. Casting away
+     * const here does not grant write access or mutate storage; ResourceEntry's
+     * historical physical-range representation uses void*.
+     */
+    ResourceEntry[1] validationResources =
+    [
+        ResourceEntry(
+            cast(void*) resourceBase,
+            resourceByteLength,
+            null,
+            null
+        )
+    ];
+
+
+    const validation =
+        validateRasterBackingLayout!T(
+            validationResources[],
+            descriptors[],
+            residentRegion
+        );
+
+
+    if (!validation.ok)
+    {
+        /*
+         * Still PRE-COMMIT.
+         *
+         * The caller retains the original OwnedByteResource unchanged.
+         */
+        return SingleResourceRasterImportResult(
+            SingleResourceRasterImportError.backingValidationFailed,
+            size_t.max,
+            PlaneByteLayoutConversionError.none,
+            validation,
+            RasterConstructionError.none
+        );
     }
 
 
@@ -299,6 +358,7 @@ SingleResourceRasterImportResult importSingleOwnedResource(T)(
             SingleResourceRasterImportError.retainedConstructionFailed,
             size_t.max,
             PlaneByteLayoutConversionError.none,
+            BackingValidationResult.init,
             construction.error
         );
     }
@@ -544,15 +604,16 @@ unittest
 unittest
 {
     /*
-     * Layout conversion can succeed while the final affine footprint is too
-     * large for the resource.
+     * Layout conversion can succeed while the complete affine footprint is too
+     * large for the physical resource.
      *
-     * This failure occurs POST-COMMIT:
+     * Full backing validation must detect this PRE-COMMIT.
      *
-     * - OwnedByteResource becomes disarmed;
-     * - retained construction rejects the layout;
-     * - physical resource is released exactly once;
-     * - no RasterLease is published.
+     * Therefore:
+     *
+     * - OwnedByteResource remains armed;
+     * - no RasterLease is published;
+     * - no physical release happens until the token itself is destroyed.
      */
 
     size_t releases;
@@ -573,53 +634,61 @@ unittest
         );
 
 
-    OwnedByteResource resource;
+    {
+        OwnedByteResource resource;
 
-    assert(
-        tryAdoptResourceEntryAssumeOwned(
-            raw,
-            resource
-        )
-    );
-
-
-    RasterLease!ubyte lease;
-
-
-    const result =
-        importSingleOwnedResource!ubyte(
-            resource,
-            [
-                PlaneByteLayout(
-                    0,
-                    4,
-                    1
-                )
-            ],
-            Region2D(
-                0,
-                0,
-                4,
-                2
-            ),
-            lease
+        assert(
+            tryAdoptResourceEntryAssumeOwned(
+                raw,
+                resource
+            )
         );
 
 
-    assert(!result.ok);
-
-    assert(
-        result.error
-        == SingleResourceRasterImportError
-            .retainedConstructionFailed
-    );
+        RasterLease!ubyte lease;
 
 
-    assert(!resource.ownsResource);
-    assert(!lease.hasBacking);
+        const result =
+            importSingleOwnedResource!ubyte(
+                resource,
+                [
+                    PlaneByteLayout(
+                        0,
+                        4,
+                        1
+                    )
+                ],
+                Region2D(
+                    0,
+                    0,
+                    4,
+                    2
+                ),
+                lease
+            );
+
+
+        assert(!result.ok);
+
+        assert(
+            result.error
+            == SingleResourceRasterImportError
+                .backingValidationFailed
+        );
+
+        assert(!result.validation.ok);
+
+        /*
+         * Invalid caller geometry never crosses the ownership commit point.
+         */
+        assert(resource.ownsResource);
+        assert(!lease.hasBacking);
+        assert(releases == 0);
+    }
+
 
     /*
-     * Raw retained construction adopted and released the resource.
+     * Token still owned the allocation and releases it normally.
      */
     assert(releases == 1);
 }

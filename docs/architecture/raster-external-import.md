@@ -744,3 +744,66 @@ The next review should decide whether the public API exposes:
 
 The transactional implementation underneath that surface is now independent
 of that choice.
+
+## C6.3a full validation before ownership commit
+
+The transactional join performs complete backing reachability validation before
+relinquishing OwnedByteResource.
+
+This strengthens the ownership contract established by C6.3.
+
+The sequence is now:
+
+```text
+OwnedByteResource armed
+        |
+        + PlaneByteLayout[]
+        + resident Region2D
+        |
+        v
+byte-layout conversion
+        |
+        v
+PlaneDescriptor[]
+        |
+        v
+validateRasterBackingLayout()
+        |
+    +---+---+
+    |       |
+ invalid   valid
+    |       |
+    |       v
+    |   COMMIT POINT
+    |       |
+    |       v
+    |   relinquishResource()
+    |       |
+    |       v
+    |   retained construction
+    |
+    v
+OwnedByteResource remains armed
+```
+
+Consequently all caller-controlled representation and geometry failures are
+pre-commit failures:
+
+- invalid byte offset;
+- alignment failure;
+- non-divisible byte stride;
+- coordinate representation failure;
+- stride/offset arithmetic failure;
+- affine footprint outside the retained byte range;
+- invalid resident Region2D geometry.
+
+On every such failure the caller still owns the original
+OwnedByteResource.
+
+Only after complete physical validation succeeds does the join transfer the
+release obligation to retained construction.
+
+The retained construction layer continues to validate independently. This is
+intentional defense in depth: the pre-commit validation provides transactional
+API semantics, while retained construction continues to protect its own raw
+boundary.
