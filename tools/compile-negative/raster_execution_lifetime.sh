@@ -180,6 +180,26 @@ alias escapedFixedLaneReduction =
 D
 
 
+cat > "$tmp_dir/reduction_dispatch_external_surface.d" <<'D'
+module raster_execution_negative_reduction_dispatch_external_surface;
+
+/*
+ * MUST FAIL.
+ *
+ * Reduction semantics and dispatch remain package-internal until a separate
+ * public raster-operation API is deliberately designed.
+ */
+import imagery.raster.internal.reduction_dispatch :
+    FloatToDoubleSumDispatchError,
+    FloatToDoubleSumResult,
+    SumReductionSemantics,
+    dispatchFloatToDoubleSum;
+
+alias escapedReductionDispatch =
+    dispatchFloatToDoubleSum;
+D
+
+
 compile_probe()
 {
     name="$1"
@@ -233,6 +253,7 @@ compile_probe positive pass
 compile_probe return_mir reject
 compile_probe external_surface reject
 compile_probe fixed_lane_external_surface reject
+compile_probe reduction_dispatch_external_surface reject
 
 echo "FAILURES=$failures"
 

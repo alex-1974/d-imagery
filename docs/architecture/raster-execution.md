@@ -1133,7 +1133,70 @@ general target == noalias
 A fixed-lane reduction must not silently replace the strict E3 reduction.
 The two operation graphs have different floating-point semantics.
 
-The next production step is E4.1: add a package-internal four-lane reduction
-specialization while retaining the strict scalar reduction as the reference
-implementation. Selection between the two belongs to an explicit numeric or
-execution policy rather than to an implicit implementation detail.
+### E4.1 fixed-lane production specialization
+
+E4.1 adds the measured four-lane reduction as a package-internal production
+kernel.
+
+The initial specialization deliberately remains narrow:
+
+```text
+source sample       float
+accumulator/result  double
+execution layout    flat Contiguous 1D
+lane count          four
+```
+
+It uses the explicit four-lane operation graph described above and does not
+enable compiler fast-math, reassociation, or no-alias attributes.
+
+The strict E3 reduction remains independently available. The fixed-lane kernel
+does not replace it and is not exposed as public raster API.
+
+Production code-generation inspection with LDC confirmed that the fixed-lane
+kernel retains the measured optimization shape: packed `<2 x double>`
+operations without `fast` or `reassoc` floating-point flags.
+
+### E4.2 reduction semantic dispatch
+
+E4.2 introduces a package-internal dispatch layer for `float -> double`
+summation.
+
+The dispatcher keeps three concerns separate:
+
+```text
+numeric semantics
+    strict
+    fixedLane4
+
+storage/execution capability
+    Universal
+    Canonical
+    Contiguous
+    flat Contiguous 1D
+
+kernel selection
+    chooses an implementation satisfying both
+```
+
+`strict` preserves the E3 row-major scalar reduction semantics. It can execute
+through Universal, Canonical, Contiguous 2D, or flat Contiguous 1D
+representations without changing that numeric contract.
+
+`fixedLane4` requests the explicit four-lane reduction graph. It currently
+requires flat Contiguous 1D execution.
+
+Lack of a compatible fixed-lane execution path is reported explicitly as
+`unsupportedExecution`. The dispatcher must not silently substitute `strict`,
+because the two reduction graphs can produce different floating-point results.
+
+For a valid empty plane both semantics return the additive identity `0.0`
+before execution adaptation. E1 deliberately assigns empty views no flat
+contiguous capability, but there are no samples and therefore no competing
+reduction graph to preserve.
+
+Invalid plane indices and invalid reduction-semantic enum values are reported
+separately.
+
+The E4.2 policy and dispatcher remain package-internal. No public sum operation
+or public numeric-policy API is introduced at this stage.
