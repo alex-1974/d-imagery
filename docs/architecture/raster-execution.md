@@ -889,3 +889,45 @@ This first E3 baseline is intentionally read-only and reduction-oriented.
 A genuine pointwise `pixel -> pixel` kernel is deferred until the execution
 architecture defines a mutable destination representation rather than
 implicitly weakening the read-only `RasterView` contract.
+
+## E3b writable target baseline
+
+Writable output is represented independently from read-only `RasterView`.
+
+The initial internal target contract is a non-owning single-plane
+`RasterTargetPlane!T` backed by mutable caller storage. Its first construction
+capability is deliberately limited to contiguous storage.
+
+The separation is semantic:
+
+- `RasterView!T` represents read-only input;
+- `RasterTargetPlane!T` represents writable output;
+- Mir remains an internal execution representation;
+- copying a target may create writable aliases;
+- the target contract does not promise uniqueness or source/target
+  non-overlap.
+
+A contiguous target borrows exactly `width * height` elements from the supplied
+storage after checked size multiplication. Empty targets preserve their logical
+dimensions and expose no reachable execution element.
+
+The writable Mir execution adapters use `Slice!(T*, 2, Contiguous)` and
+`Slice!(T*, 1, Contiguous)`.
+
+DIP1000 is required to preserve the complete borrow chain:
+
+    caller mutable storage
+        -> RasterTargetPlane
+        -> writable Mir Slice
+
+Returning either the target or its Mir execution view is permitted only when
+the originating caller-owned storage outlives the return value. Targets backed
+by local storage must not escape through a return value or global assignment.
+
+No additional `@trusted` boundary is required for the initial writable target
+contract.
+
+General padded, strided, negative-stride, ROI, and multi-plane target semantics
+are deliberately not claimed by this baseline. They can be added as separately
+validated construction capabilities without weakening the read-only
+`RasterView` contract.
