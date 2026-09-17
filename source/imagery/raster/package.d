@@ -9,6 +9,10 @@ module imagery.raster;
 public import imagery.raster.sample :
     isRasterSampleType;
 
+public import imagery.raster.owned_resource :
+    OwnedByteResource,
+    tryAdoptMallocResource;
+
 public import imagery.raster.descriptor :
     PlaneDescriptor;
 

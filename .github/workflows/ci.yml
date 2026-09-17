@@ -107,3 +107,8 @@ jobs:
         shell: bash
         run: |
           tools/compile-negative/raster_construction_lifetime.sh "$DC"
+
+      - name: Raster owned-resource compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_owned_resource.sh "$DC"

@@ -508,3 +508,36 @@ Before C6 is considered complete, tests should prove:
 15. the public token does not expose release callback/context state.
 
 16. all existing lifetime compile probes remain green.
+
+## C6.1 implementation: ownership token
+
+C6.1 implements the first layer of this design:
+
+```text
+raw malloc allocation
+        |
+        | @system explicit adoption
+        v
+OwnedByteResource
+```
+
+Implemented invariants:
+
+- OwnedByteResource is move-only.
+- An armed token carries exactly one release obligation.
+- Destruction releases that obligation exactly once.
+- Moving transfers the obligation.
+- Relinquishing to package-internal raw construction disarms the token.
+- The public malloc-compatible adoption boundary is @system.
+- ResourceEntry and ReleaseFn remain outside the public imagery.raster API.
+- Raw callback/context adoption remains package-internal and @system.
+
+C6.1 deliberately does not yet implement:
+
+- PlaneByteLayout;
+- byte-stride conversion;
+- RasterLease import;
+- multiple physical resources;
+- borrowed storage.
+
+Those belong to later C6 implementation steps.
