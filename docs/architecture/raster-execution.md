@@ -965,3 +965,175 @@ concerns.
 
 The scalar copy kernels are the pointwise correctness reference for later fast
 paths and code-generation inspection.
+
+## E4 execution specialization research
+
+E4 begins from measured code generation rather than from an assumption that
+the internal Mir representation itself needs to be bypassed.
+
+The initial code-generation experiments used LDC 1.41.0 with LLVM 19.1.7 on
+an x86-64 Skylake host, compiled with optimization, bounds checks disabled,
+and the native CPU selected. These results establish optimization
+opportunities and semantic constraints; they are not portable performance
+thresholds.
+
+### Mir versus raw contiguous loops
+
+For the tested contiguous kernels, equivalent Mir-based and raw-pointer loops
+produced effectively the same optimized code:
+
+- `ubyte` contiguous copy was vectorized in both cases;
+- `ubyte -> ulong` reduction was vectorized in both cases;
+- strict `float -> double` reduction remained scalar in both cases.
+
+Therefore E4 does not introduce a parallel raw-pointer implementation merely
+to bypass Mir. Mir remains an internal execution representation where its
+generated code is equivalent.
+
+### Copy aliasing policy
+
+A contiguous copy with unknown source/target aliasing caused LLVM to emit a
+runtime alias/distance check before entering its vector path.
+
+Applying LDC's `@restrict` to both pointers expressed a stronger no-alias
+precondition in LLVM IR and allowed the copy loop to collapse to `memcpy`.
+
+Benchmarking showed that this stronger precondition is useful but not
+universally faster at every size. The result varied substantially with buffer
+size on the measured system.
+
+Consequences:
+
+- `RasterTargetPlane` does not imply exclusivity or non-overlap;
+- no `restrict`/noalias promise is added to the general target contract;
+- known non-overlap is a future execution-policy fact established by a higher
+  layer;
+- no architecture-independent copy-size threshold is encoded from this
+  experiment.
+
+### Strict floating-point reduction
+
+The E3 scalar reduction defines ordinary D floating-point arithmetic in its
+iteration order.
+
+For a `float` source accumulated into `double`, LLVM kept the strict reduction
+as a serial dependency chain:
+
+```text
+total = (((0 + x0) + x1) + x2) + ...
+```
+
+Loop unrolling did not remove this dependency. This remains the
+correctness/reference behavior.
+
+### Fast-math experiment
+
+LDC `@fastmath` enabled aggressive vector reduction for the same
+`float -> double` sum.
+
+This is useful as a performance upper bound, but it is not the default
+d-imagery numeric contract. LDC defines `@fastmath` more broadly than merely
+allowing reassociation, so using it would relinquish additional
+floating-point guarantees.
+
+LDC 1.41.0 does not expose `reassoc` as an independently supported
+`llvmFastMathFlag`. Supplying `@llvmFastMathFlag("reassoc")` is ignored with a
+compiler warning. Experiments using that spelling therefore did not represent
+a reassociation-only policy.
+
+### Explicit fixed-lane reduction
+
+A more useful optimization was obtained by changing the operation graph
+explicitly rather than enabling fast-math.
+
+The tested four-lane reduction is defined as:
+
+```text
+a0 = x0 + x4 + x8  + ...
+a1 = x1 + x5 + x9  + ...
+a2 = x2 + x6 + x10 + ...
+a3 = x3 + x7 + x11 + ...
+
+result = (a0 + a1) + (a2 + a3)
+```
+
+Tail samples are appended in increasing index order after the four lane
+accumulators are combined.
+
+LLVM vectorized this graph without `fast` or `reassoc` floating-point flags.
+On the measured Skylake system it grouped independent accumulation chains into
+128-bit packed-double operations.
+
+Across the realistic positive and signed test datasets, the four-lane kernel
+was approximately 3.2x to 4.0x faster than the strict reduction over the
+tested working-set sizes.
+
+For those datasets, with `float` source values and a `double` accumulator, the
+tested strict, four-lane, eight-lane, fast-math, and compensated-reference
+results happened to be identical. This observation is not a general
+floating-point accuracy guarantee.
+
+An adversarial cancellation dataset demonstrated why the operation graph is
+part of the numeric semantics. Different legal reduction trees produced
+dramatically different results. A fast-math result that happened to equal the
+compensated reference for that constructed pattern does not imply that
+fast-math is generally more accurate.
+
+### Four lanes versus eight lanes
+
+An explicit eight-lane graph was also tested.
+
+It did not widen the generated vector operations beyond the packed
+two-double form already used for the four-lane graph. Seven-round benchmarks
+with rotating execution order showed no meaningful performance advantage.
+
+For the realistic positive and signed datasets:
+
+```text
+median lane4 / lane8 ~= 0.997
+observed range       ~= 0.986 .. 1.006
+```
+
+The eight-lane form therefore adds a more complex numeric operation graph
+without a demonstrated performance or accuracy benefit.
+
+E4 does not pursue fixed-lane8 or fixed-lane16 based on the current evidence.
+
+### E4 research conclusions
+
+The research phase establishes the following constraints for production
+specialization:
+
+```text
+general contiguous Mir execution
+    keep
+
+raw-pointer Mir bypass
+    do not add
+
+strict reduction
+    preserve as reference/default semantics
+
+fixed-lane4 reduction
+    viable explicit numeric specialization
+
+fixed-lane8
+    do not pursue
+
+fast-math reduction
+    research/performance upper bound only
+
+known-non-overlap copy
+    viable future execution specialization
+
+general target == noalias
+    false
+```
+
+A fixed-lane reduction must not silently replace the strict E3 reduction.
+The two operation graphs have different floating-point semantics.
+
+The next production step is E4.1: add a package-internal four-lane reduction
+specialization while retaining the strict scalar reduction as the reference
+implementation. Selection between the two belongs to an explicit numeric or
+execution policy rather than to an implicit implementation detail.
