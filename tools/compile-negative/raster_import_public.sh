@@ -93,6 +93,33 @@ import imagery.raster :
 D
 
 
+cat > "$tmp_dir/result_constructor.d" <<'D'
+module raster_import_public_negative_result_constructor;
+
+import imagery.raster :
+    OwnedRasterImportError,
+    OwnedRasterImportResult,
+    OwnedRasterResourceDisposition;
+
+
+/*
+ * MUST FAIL:
+ *
+ * Public callers may not fabricate an arbitrary successful ownership result
+ * through the module-private constructor.
+ */
+void invalidResultConstruction()
+{
+    auto result =
+        OwnedRasterImportResult(
+            OwnedRasterImportError.none,
+            size_t.max,
+            OwnedRasterResourceDisposition.transferredToLease
+        );
+}
+D
+
+
 cat > "$tmp_dir/result_mutation.d" <<'D'
 module raster_import_public_negative_result_mutation;
 
@@ -167,6 +194,7 @@ echo "compiler=$compiler"
 
 compile_probe positive_safe pass
 compile_probe internal_surface reject
+compile_probe result_constructor reject
 compile_probe result_mutation reject
 
 echo "FAILURES=$failures"

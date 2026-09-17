@@ -386,6 +386,7 @@ import core.stdc.stdlib :
     malloc;
 
 import imagery.raster.owned_resource :
+    tryAdoptMallocResource,
     tryAdoptResourceEntryAssumeOwned;
 
 import imagery.raster.resource :
@@ -948,6 +949,387 @@ unittest
 
 
     assert(releases == 1);
+}
+
+
+
+unittest
+{
+    /*
+     * Public interleaved RGB import through the retained API.
+     *
+     * One physical allocation backs three logical planes:
+     *
+     * R base offset = 0
+     * G base offset = 1
+     * B base offset = 2
+     *
+     * Each logical pixel advances by three bytes.
+     */
+
+    enum size_t width = 2;
+    enum size_t height = 2;
+    enum size_t byteLength =
+        width * height * 3;
+
+
+    auto memory =
+        cast(ubyte*) malloc(byteLength);
+
+    assert(memory !is null);
+
+
+    ubyte[byteLength] values =
+    [
+        10,  20,  30,
+        40,  50,  60,
+        70,  80,  90,
+        100, 110, 120
+    ];
+
+
+    foreach (index; 0 .. byteLength)
+    {
+        memory[index] =
+            values[index];
+    }
+
+
+    OwnedByteResource resource;
+
+    assert(
+        tryAdoptMallocResource(
+            memory,
+            byteLength,
+            resource
+        )
+    );
+
+
+    RasterLease!ubyte lease;
+
+
+    PlaneByteLayout[3] planes =
+    [
+        PlaneByteLayout(
+            0,
+            width * 3,
+            3
+        ),
+        PlaneByteLayout(
+            1,
+            width * 3,
+            3
+        ),
+        PlaneByteLayout(
+            2,
+            width * 3,
+            3
+        )
+    ];
+
+
+    const result =
+        tryImportOwnedRaster!ubyte(
+            resource,
+            planes[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            lease
+        );
+
+
+    assert(result.ok);
+
+    assert(
+        result.resourceDisposition
+        == OwnedRasterResourceDisposition.transferredToLease
+    );
+
+    assert(!resource.ownsResource);
+    assert(lease.hasBacking);
+
+
+    auto view =
+        lease.view();
+
+    assert(view.planeCount == 3);
+
+
+    ubyte red;
+    ubyte green;
+    ubyte blue;
+
+
+    assert(
+        view.trySample(
+            0,
+            1,
+            1,
+            red
+        )
+    );
+
+    assert(
+        view.trySample(
+            1,
+            1,
+            1,
+            green
+        )
+    );
+
+    assert(
+        view.trySample(
+            2,
+            1,
+            1,
+            blue
+        )
+    );
+
+
+    assert(red == 100);
+    assert(green == 110);
+    assert(blue == 120);
+}
+
+
+unittest
+{
+    /*
+     * Public single-allocation planar RGB import.
+     *
+     * All three planes occupy separate contiguous regions inside one physical
+     * allocation.
+     */
+
+    enum size_t width = 2;
+    enum size_t height = 2;
+    enum size_t planeBytes =
+        width * height;
+    enum size_t byteLength =
+        planeBytes * 3;
+
+
+    auto memory =
+        cast(ubyte*) malloc(byteLength);
+
+    assert(memory !is null);
+
+
+    ubyte[byteLength] values =
+    [
+        /*
+         * R
+         */
+        1, 2,
+        3, 4,
+
+        /*
+         * G
+         */
+        11, 12,
+        13, 14,
+
+        /*
+         * B
+         */
+        21, 22,
+        23, 24
+    ];
+
+
+    foreach (index; 0 .. byteLength)
+    {
+        memory[index] =
+            values[index];
+    }
+
+
+    OwnedByteResource resource;
+
+    assert(
+        tryAdoptMallocResource(
+            memory,
+            byteLength,
+            resource
+        )
+    );
+
+
+    RasterLease!ubyte lease;
+
+
+    PlaneByteLayout[3] planes =
+    [
+        PlaneByteLayout(
+            0,
+            width,
+            1
+        ),
+        PlaneByteLayout(
+            planeBytes,
+            width,
+            1
+        ),
+        PlaneByteLayout(
+            planeBytes * 2,
+            width,
+            1
+        )
+    ];
+
+
+    const result =
+        tryImportOwnedRaster!ubyte(
+            resource,
+            planes[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            lease
+        );
+
+
+    assert(result.ok);
+    assert(!resource.ownsResource);
+    assert(lease.hasBacking);
+
+
+    auto view =
+        lease.view();
+
+
+    ubyte red;
+    ubyte green;
+    ubyte blue;
+
+
+    assert(
+        view.trySample(
+            0,
+            1,
+            1,
+            red
+        )
+    );
+
+    assert(
+        view.trySample(
+            1,
+            1,
+            1,
+            green
+        )
+    );
+
+    assert(
+        view.trySample(
+            2,
+            1,
+            1,
+            blue
+        )
+    );
+
+
+    assert(red == 4);
+    assert(green == 14);
+    assert(blue == 24);
+}
+
+
+unittest
+{
+    /*
+     * Empty resident extents remain valid raster geometry.
+     *
+     * The plane base itself still belongs to a real retained resource; only the
+     * requested resident extent is empty.
+     */
+
+    auto memory =
+        cast(ubyte*) malloc(1);
+
+    assert(memory !is null);
+
+    memory[0] = 42;
+
+
+    OwnedByteResource resource;
+
+    assert(
+        tryAdoptMallocResource(
+            memory,
+            1,
+            resource
+        )
+    );
+
+
+    RasterLease!ubyte lease;
+
+
+    PlaneByteLayout[1] planes =
+    [
+        PlaneByteLayout(
+            0,
+            1,
+            1
+        )
+    ];
+
+
+    const result =
+        tryImportOwnedRaster!ubyte(
+            resource,
+            planes[],
+            Region2D(
+                0,
+                0,
+                0,
+                0
+            ),
+            lease
+        );
+
+
+    assert(result.ok);
+
+    assert(
+        result.resourceDisposition
+        == OwnedRasterResourceDisposition.transferredToLease
+    );
+
+    assert(!resource.ownsResource);
+    assert(lease.hasBacking);
+
+
+    auto view =
+        lease.view();
+
+    assert(view.width == 0);
+    assert(view.height == 0);
+
+
+    ubyte value;
+
+    assert(
+        !view.trySample(
+            0,
+            0,
+            0,
+            value
+        )
+    );
 }
 
 

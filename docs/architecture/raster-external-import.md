@@ -1495,3 +1495,32 @@ C6.5 adds compiler probes establishing that:
 - public callers cannot mutate the private result state.
 
 These probes run under both DMD and LDC in CI.
+
+## C6.6 public import closure audit
+
+C6.6 adds closure coverage for the first public retained-import API.
+
+The audit exercises the public import semantics for:
+
+- pixel-interleaved RGB in one physical allocation;
+- planar RGB in one physical allocation;
+- empty resident extents with a valid retained plane base;
+- public rejection of direct construction of arbitrary
+  OwnedRasterImportResult states.
+
+The RGB cases are important because they prove that the public API preserves
+the core separation between logical planes and physical storage topology.
+
+Interleaved RGB uses three logical PlaneByteLayout values with byte offsets
+0, 1, and 2 and a sample stride of three bytes.
+
+Single-allocation planar RGB uses three logical PlaneByteLayout values with
+separate offsets into one retained physical allocation and a sample stride of
+one byte.
+
+The empty-region audit verifies that an empty resident extent remains valid
+geometry while sample access remains impossible.
+
+The public compile probes additionally verify that callers cannot fabricate a
+successful ownership disposition through the module-private
+OwnedRasterImportResult constructor.
