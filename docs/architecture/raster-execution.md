@@ -1200,3 +1200,75 @@ separately.
 
 The E4.2 policy and dispatcher remain package-internal. No public sum operation
 or public numeric-policy API is introduced at this stage.
+
+### E4.3a checked source/target non-overlap
+
+E4.3a establishes the alias-relation contract required before a stronger
+contiguous-copy specialization can be considered.
+
+Non-overlap is deliberately modeled as a relation between one concrete source
+plane and one concrete writable target. It is not a property of
+`RasterTargetPlane`, and callers do not supply an unchecked `nonOverlap`
+assertion.
+
+The initial checked operation is limited to:
+
+```text
+source
+    validated RasterView plane
+    flat Contiguous 1D execution capability
+
+target
+    contiguous RasterTargetPlane
+
+sample type
+    identical source/target T
+```
+
+Dispatch first validates the plane index and logical shape. Matching empty
+source/target shapes succeed without forming physical sample intervals.
+
+For a non-empty flat-contiguous pair, the operation derives the exact physical
+half-open byte intervals:
+
+```text
+[sourceStart, sourceEnd)
+[targetStart, targetEnd)
+```
+
+A narrow trusted boundary converts the already validated source and target
+pointers to the project's flat integer-address representation and checks byte
+length and interval-end arithmetic for overflow.
+
+The relation has three internal outcomes:
+
+```text
+overlapping
+non-overlapping
+unrepresentable
+```
+
+Overlap and unrepresentable address ranges fail before the first target write.
+
+The successful E4.3a path still executes the E3c scalar contiguous reference
+copy. It intentionally introduces no `restrict`, LLVM `noalias`, `memcpy`,
+`memmove`, fast-math, or size threshold.
+
+This separation is intentional:
+
+```text
+E4.3a
+    prove the source/target relation and define failure semantics
+
+E4.3b
+    evaluate and add a stronger execution kernel only after that proof
+```
+
+No persistent proof token is introduced. The non-overlap fact is checked and
+consumed in the same operation, preventing it from later being combined with a
+different source or target.
+
+The checked copy dispatcher remains package-internal. DIP1000 compile probes
+verify that already-valid source and target borrows can enter the operation
+from `@safe` code while only a value result is returned, and that the dispatch
+surface is not visible outside `imagery.raster`.

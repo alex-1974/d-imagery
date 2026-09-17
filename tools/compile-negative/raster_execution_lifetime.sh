@@ -200,6 +200,76 @@ alias escapedReductionDispatch =
 D
 
 
+cat > "$tmp_dir/copy_dispatch_positive.d" <<'D'
+module imagery.raster.copy_dispatch_positive;
+
+import imagery.raster.internal.copy_dispatch :
+    tryCopyNonOverlappingContiguous1D;
+
+import imagery.raster.internal.target :
+    RasterTargetPlane;
+
+import imagery.raster.view :
+    RasterView;
+
+
+/*
+ * MUST PASS.
+ *
+ * Construction/validation of RasterView and RasterTargetPlane is tested at
+ * their own boundaries.
+ *
+ * This probe isolates the E4.3a contract:
+ *
+ * already-valid source borrow
+ *     +
+ * already-valid writable target borrow
+ *     ->
+ * checked copy dispatch
+ *     ->
+ * value-only result
+ *
+ * Neither input borrow is returned or otherwise allowed to escape.
+ */
+@safe
+nothrow
+@nogc
+bool exerciseCopyDispatch(
+    scope RasterView!ubyte source,
+    scope RasterTargetPlane!ubyte target
+)
+{
+    const result =
+        tryCopyNonOverlappingContiguous1D(
+            source,
+            0,
+            target
+        );
+
+    return result.ok;
+}
+D
+
+
+cat > "$tmp_dir/copy_dispatch_external_surface.d" <<'D'
+module raster_execution_negative_copy_dispatch_external_surface;
+
+/*
+ * MUST FAIL.
+ *
+ * Checked source/target alias analysis and copy dispatch remain
+ * package-internal execution machinery.
+ */
+import imagery.raster.internal.copy_dispatch :
+    NonOverlappingCopyError,
+    NonOverlappingCopyResult,
+    tryCopyNonOverlappingContiguous1D;
+
+alias escapedCopyDispatch =
+    tryCopyNonOverlappingContiguous1D;
+D
+
+
 compile_probe()
 {
     name="$1"
@@ -250,10 +320,12 @@ compile_probe()
 echo "compiler=$compiler"
 
 compile_probe positive pass
+compile_probe copy_dispatch_positive pass
 compile_probe return_mir reject
 compile_probe external_surface reject
 compile_probe fixed_lane_external_surface reject
 compile_probe reduction_dispatch_external_surface reject
+compile_probe copy_dispatch_external_surface reject
 
 echo "FAILURES=$failures"
 
