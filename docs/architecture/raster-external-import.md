@@ -575,3 +575,96 @@ or explicitly transfer the old ownership obligation and only then perform a
 new adoption.
 
 This keeps every ownership transition explicit and exact-once.
+
+## C6.2 implementation: byte-oriented plane layout
+
+C6.2 implements the ownership-independent external layout layer:
+
+```text
+PlaneByteLayout
+        |
+        | sample type T known
+        | exact checked byte conversion
+        v
+PlaneDescriptor
+```
+
+PlaneByteLayout is public metadata and owns no storage.
+
+The conversion helper remains package-internal and `@system` because it accepts
+a raw external resource base pointer.
+
+C6.2 does not consume or mutate OwnedByteResource.
+
+### Byte stride representation
+
+`rowStrideBytes` and `sampleStrideBytes` are already represented as
+`ptrdiff_t`.
+
+For a valid raster sample type T, conversion requires:
+
+```text
+byteStride % T.sizeof == 0
+```
+
+and then:
+
+```text
+elementStride = byteStride / T.sizeof
+```
+
+Because the source value already fits `ptrdiff_t` and `T.sizeof` is positive,
+an exact division cannot increase the magnitude of the value.
+
+There is therefore no separate runtime "element stride overflow" after exact
+division.
+
+The implementation deliberately performs no absolute-value conversion and no
+negation of the byte stride. This is important for `ptrdiff_t.min`.
+
+### Conversion validation
+
+C6.2 proves:
+
+- resource base is non-null;
+- resource byte range arithmetic is representable;
+- byteOffset identifies a byte inside the resource;
+- base + byteOffset is representable;
+- plane base satisfies T alignment;
+- rowStrideBytes is exactly divisible by T.sizeof;
+- sampleStrideBytes is exactly divisible by T.sizeof.
+
+C6.2 deliberately does not prove the complete two-dimensional affine
+footprint.
+
+That remains the responsibility of the existing retained-backing validator
+once C6.3 combines:
+
+```text
+physical resource
+PlaneDescriptor[]
+resident Region2D
+```
+
+### Ownership separation
+
+The C6.2 conversion has no ownership transition.
+
+In particular:
+
+```text
+OwnedByteResource
+    is not consumed
+
+release obligations
+    do not change
+
+PlaneByteLayout
+    is caller-owned metadata
+
+PlaneDescriptor
+    is derived metadata only
+```
+
+C6.3 will be the first layer that transactionally joins ownership and converted
+layout metadata.
