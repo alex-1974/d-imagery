@@ -20,6 +20,11 @@ module imagery.raster.view;
 import imagery.raster.descriptor :
     PlaneDescriptor;
 
+import imagery.raster.internal.execution_layout :
+    PlaneExecutionLayout2D,
+    PlaneExecutionTraits,
+    classifyPlaneExecutionLayout;
+
 import imagery.raster.region :
     Region2D;
 
@@ -121,6 +126,44 @@ public:
     @nogc
     {
         return region_.empty();
+    }
+
+
+    /++
+        Attempts to query execution capabilities for one logical plane.
+
+        This is an internal control-plane query. It exposes derived execution
+        metadata only; the underlying PlaneDescriptor remains private.
+
+        On success `traits` contains the classification for the current
+        RasterView region.
+
+        On failure `traits` is reset to PlaneExecutionTraits.init.
+    +/
+    package(imagery.raster)
+    bool tryPlaneExecutionTraits(
+        size_t planeIndex,
+        out PlaneExecutionTraits traits
+    ) const
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        traits = PlaneExecutionTraits.init;
+
+        if (planeIndex >= planes_.length)
+        {
+            return false;
+        }
+
+        traits =
+            classifyPlaneExecutionLayout(
+                planes_[planeIndex],
+                region_
+            );
+
+        return true;
     }
 
 
@@ -1091,3 +1134,365 @@ unittest
 
 
 } // version (unittest)
+
+
+version (unittest)
+{
+
+/*
+ * Raster execution-layout integration tests.
+ *
+ * These tests deliberately exercise classification through RasterView rather
+ * than calling the descriptor classifier directly.
+ */
+
+unittest
+{
+    auto planar =
+        makePlanarTestView();
+
+    auto interleaved =
+        makeInterleavedTestView();
+
+    PlaneExecutionTraits traits;
+
+
+    assert(
+        planar.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.contiguous
+    );
+
+    assert(traits.linearContiguous1D);
+
+    assert(
+        traits.flatElementCount
+        == testWidth * testHeight
+    );
+
+
+    assert(
+        interleaved.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.universal
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+}
+
+
+unittest
+{
+    /*
+     * Classification belongs to the current RasterView, not its parent.
+     */
+
+    auto parent =
+        makePlanarTestView();
+
+    bool success;
+
+
+    /*
+     * Narrow multi-row ROI:
+     *
+     *     physical row stride = 4
+     *     current width       = 2
+     *
+     * Therefore Canonical, not Contiguous.
+     */
+    auto narrow =
+        parent.tryRoi(
+            Region2D(
+                1,
+                0,
+                2,
+                testHeight
+            ),
+            success
+        );
+
+    assert(success);
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        narrow.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.canonical
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+
+
+    /*
+     * Full-row subset:
+     *
+     * current width still equals the stored row stride.
+     */
+    auto fullRows =
+        parent.tryRoi(
+            Region2D(
+                0,
+                1,
+                testWidth,
+                2
+            ),
+            success
+        );
+
+    assert(success);
+
+    assert(
+        fullRows.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.contiguous
+    );
+
+    assert(traits.linearContiguous1D);
+
+    assert(
+        traits.flatElementCount
+        == testWidth * 2
+    );
+
+
+    /*
+     * Single-row narrow ROI:
+     *
+     * row stride is irrelevant because no row transition occurs.
+     */
+    auto singleRow =
+        parent.tryRoi(
+            Region2D(
+                1,
+                1,
+                2,
+                1
+            ),
+            success
+        );
+
+    assert(success);
+
+    assert(
+        singleRow.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.contiguous
+    );
+
+    assert(traits.linearContiguous1D);
+    assert(traits.flatElementCount == 2);
+}
+
+
+unittest
+{
+    /*
+     * One RasterView may contain heterogeneous physical plane layouts.
+     */
+
+    ubyte[64] storage;
+
+    const PlaneDescriptor[3] descriptors =
+    [
+        /*
+         * Contiguous.
+         */
+        PlaneDescriptor(
+            storage.ptr,
+            4,
+            1
+        ),
+
+        /*
+         * Canonical with padded rows.
+         */
+        PlaneDescriptor(
+            storage.ptr,
+            8,
+            1
+        ),
+
+        /*
+         * Universal, representative of a logical channel in an
+         * interleaved stream.
+         */
+        PlaneDescriptor(
+            storage.ptr,
+            12,
+            3
+        )
+    ];
+
+    auto view =
+        makeRasterViewAssumeValidated!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                3
+            )
+        );
+
+    PlaneExecutionTraits traits;
+
+
+    assert(
+        view.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.contiguous
+    );
+
+    assert(traits.linearContiguous1D);
+    assert(traits.flatElementCount == 12);
+
+
+    assert(
+        view.tryPlaneExecutionTraits(
+            1,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.canonical
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+
+
+    assert(
+        view.tryPlaneExecutionTraits(
+            2,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.universal
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+}
+
+
+unittest
+{
+    /*
+     * Invalid plane index:
+     *
+     * - controlled false result;
+     * - deterministic reset to .init.
+     */
+    auto view =
+        makePlanarTestView();
+
+    PlaneExecutionTraits traits =
+        PlaneExecutionTraits(
+            PlaneExecutionLayout2D.contiguous,
+            true,
+            123
+        );
+
+    assert(
+        !view.tryPlaneExecutionTraits(
+            view.planeCount,
+            traits
+        )
+    );
+
+    assert(
+        traits
+        == PlaneExecutionTraits.init
+    );
+}
+
+
+unittest
+{
+    /*
+     * Empty ROI remains a valid RasterView but conservatively exposes no
+     * execution-layout capability.
+     */
+    auto parent =
+        makePlanarTestView();
+
+    bool success;
+
+    auto emptyView =
+        parent.tryRoi(
+            Region2D(
+                testWidth,
+                testHeight,
+                0,
+                0
+            ),
+            success
+        );
+
+    assert(success);
+    assert(emptyView.empty);
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        emptyView.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.universal
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+}
+
+}
