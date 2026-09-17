@@ -807,3 +807,81 @@ The retained construction layer continues to validate independently. This is
 intentional defense in depth: the pre-commit validation provides transactional
 API semantics, while retained construction continues to protect its own raw
 boundary.
+
+## C6.3b deterministic scratch allocation and trusted boundary
+
+The single-resource join now separates implementation mechanics from the
+trusted certification point.
+
+The internal structure is:
+
+```text
+package importSingleOwnedResource()
+             |
+             | small audited @trusted wrapper
+             v
+private importSingleOwnedResourceWithDescriptorOps()
+             |
+             | @system implementation
+             |
+             +-- raw OwnedByteResource access
+             +-- temporary descriptor allocation
+             +-- byte-layout conversion
+             +-- backing validation
+             +-- ownership relinquishment
+             `-- raw retained construction
+```
+
+The production wrapper supplies one matching scratch allocation pair:
+
+```text
+malloc
+  |
+  +--> temporary PlaneDescriptor[]
+  |
+free
+```
+
+The injectable descriptor allocation operations exist only to make failure
+paths deterministic in unit tests. They are not part of the public API.
+
+### Descriptor allocation failure
+
+Failure to allocate the temporary PlaneDescriptor table is a PRE-COMMIT
+failure.
+
+Therefore:
+
+```text
+descriptor allocation fails
+        |
+        v
+OwnedByteResource remains armed
+RasterLease remains empty
+physical resource is not released
+```
+
+### Scratch cleanup after later pre-commit failure
+
+If scratch allocation succeeds but byte-layout conversion or backing
+validation later fails, the temporary descriptor table is released exactly
+once while the physical resource remains owned by OwnedByteResource.
+
+### Trusted certification
+
+The package-level production wrapper is the only `@trusted` function in the
+single-resource join module.
+
+The larger implementation is explicitly `@system`.
+
+This makes the trust decision easy to locate and audit. The wrapper certifies
+that the system implementation is safe only under the documented production
+configuration and invariants.
+
+The wrapper does not expose:
+
+- ResourceEntry;
+- raw resource pointers;
+- allocator hooks;
+- release callbacks;
+- release contexts.

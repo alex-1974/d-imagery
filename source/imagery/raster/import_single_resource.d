@@ -55,6 +55,45 @@ import imagery.raster.sample :
 
 
 /++
+    Scratch descriptor allocation operations.
+
+    These are internal implementation hooks used both by the production join
+    and deterministic failure tests.
++/
+private alias DescriptorAllocateFn =
+    void* function(size_t byteLength)
+    nothrow
+    @nogc;
+
+private alias DescriptorFreeFn =
+    void function(void* allocation)
+    nothrow
+    @nogc;
+
+
+private
+void* allocateDescriptorMetadata(
+    size_t byteLength
+)
+nothrow
+@nogc
+{
+    return malloc(byteLength);
+}
+
+
+private
+void freeDescriptorMetadata(
+    void* allocation
+)
+nothrow
+@nogc
+{
+    free(allocation);
+}
+
+
+/++
     Package-internal failure category for the first single-resource retained
     import join.
 +/
@@ -151,14 +190,16 @@ struct SingleResourceRasterImportResult
     This function remains package-internal while its public-facing error and
     ownership API is reviewed.
 +/
-package(imagery.raster)
-SingleResourceRasterImportResult importSingleOwnedResource(T)(
+private
+SingleResourceRasterImportResult importSingleOwnedResourceWithDescriptorOps(T)(
     ref OwnedByteResource resource,
     scope const(PlaneByteLayout)[] layouts,
     Region2D residentRegion,
-    ref RasterLease!T lease
+    ref RasterLease!T lease,
+    DescriptorAllocateFn allocateDescriptors,
+    DescriptorFreeFn freeDescriptors
 )
-@trusted
+@system
 {
     static assert(
         isRasterSampleType!T,
@@ -207,7 +248,7 @@ SingleResourceRasterImportResult importSingleOwnedResource(T)(
 
 
     void* descriptorAllocation =
-        malloc(descriptorBytes);
+        allocateDescriptors(descriptorBytes);
 
 
     if (descriptorAllocation is null)
@@ -220,7 +261,7 @@ SingleResourceRasterImportResult importSingleOwnedResource(T)(
 
     scope(exit)
     {
-        free(descriptorAllocation);
+        freeDescriptors(descriptorAllocation);
     }
 
 
@@ -368,6 +409,48 @@ SingleResourceRasterImportResult importSingleOwnedResource(T)(
 }
 
 
+/++
+    Production entry point for the package-internal single-resource join.
+
+    This wrapper is deliberately the only @trusted certification point for the
+    complete join.
+
+    Safety argument:
+
+    - OwnedByteResource exposes only ownership state through its safe public
+      surface; its raw resource access and relinquishment remain package
+      @system operations.
+    - PlaneByteLayout and Region2D are value metadata.
+    - RasterLease is required to be empty before any ownership transition.
+    - importSingleOwnedResourceWithDescriptorOps performs complete byte-layout
+      conversion and backing validation before relinquishing ownership.
+    - its scratch allocator is the matching malloc/free pair supplied below.
+    - after relinquishment, constructRetainedRaster owns the raw release
+      obligation transactionally.
+    - no raw pointer or ResourceEntry escapes through this wrapper.
+
+    Any change to those assumptions requires re-auditing this @trusted wrapper.
++/
+package(imagery.raster)
+SingleResourceRasterImportResult importSingleOwnedResource(T)(
+    ref OwnedByteResource resource,
+    scope const(PlaneByteLayout)[] layouts,
+    Region2D residentRegion,
+    ref RasterLease!T lease
+)
+@trusted
+{
+    return importSingleOwnedResourceWithDescriptorOps!T(
+        resource,
+        layouts,
+        residentRegion,
+        lease,
+        &allocateDescriptorMetadata,
+        &freeDescriptorMetadata
+    );
+}
+
+
 version (unittest)
 {
 
@@ -396,6 +479,60 @@ nothrow
     ++*releases;
 
     free(base);
+}
+
+
+private size_t descriptorAllocationCalls;
+
+private size_t descriptorFreeCalls;
+
+
+private
+void resetDescriptorAllocationCounters()
+nothrow
+@nogc
+{
+    descriptorAllocationCalls = 0;
+    descriptorFreeCalls = 0;
+}
+
+
+private
+void* failDescriptorAllocation(
+    size_t byteLength
+)
+nothrow
+@nogc
+{
+    ++descriptorAllocationCalls;
+
+    return null;
+}
+
+
+private
+void* countDescriptorAllocation(
+    size_t byteLength
+)
+nothrow
+@nogc
+{
+    ++descriptorAllocationCalls;
+
+    return malloc(byteLength);
+}
+
+
+private
+void countDescriptorFree(
+    void* allocation
+)
+nothrow
+@nogc
+{
+    ++descriptorFreeCalls;
+
+    free(allocation);
 }
 
 
@@ -894,6 +1031,178 @@ unittest
 
     assert(firstReleases == 1);
     assert(secondReleases == 1);
+}
+
+
+unittest
+{
+    /*
+     * Temporary descriptor allocation failure is PRE-COMMIT.
+     *
+     * The physical resource remains owned by OwnedByteResource and the output
+     * lease remains empty.
+     */
+
+    resetDescriptorAllocationCounters();
+
+    size_t releases;
+
+
+    auto memory =
+        cast(ubyte*) malloc(4);
+
+    assert(memory !is null);
+
+
+    ResourceEntry raw =
+        ResourceEntry(
+            memory,
+            4,
+            &releases,
+            &releaseCountedImportResource
+        );
+
+
+    {
+        OwnedByteResource resource;
+
+        assert(
+            tryAdoptResourceEntryAssumeOwned(
+                raw,
+                resource
+            )
+        );
+
+
+        RasterLease!ubyte lease;
+
+
+        const result =
+            importSingleOwnedResourceWithDescriptorOps!ubyte(
+                resource,
+                [
+                    PlaneByteLayout(
+                        0,
+                        2,
+                        1
+                    )
+                ],
+                Region2D(
+                    0,
+                    0,
+                    2,
+                    2
+                ),
+                lease,
+                &failDescriptorAllocation,
+                &countDescriptorFree
+            );
+
+
+        assert(
+            result.error
+            == SingleResourceRasterImportError
+                .descriptorMetadataAllocationFailed
+        );
+
+        assert(resource.ownsResource);
+        assert(!lease.hasBacking);
+
+        assert(descriptorAllocationCalls == 1);
+        assert(descriptorFreeCalls == 0);
+
+        assert(releases == 0);
+    }
+
+
+    /*
+     * Ownership never crossed the commit point.
+     */
+    assert(releases == 1);
+}
+
+
+unittest
+{
+    /*
+     * Once scratch descriptor allocation succeeds, any later PRE-COMMIT
+     * layout failure must still release the scratch table exactly once without
+     * consuming the physical resource.
+     */
+
+    resetDescriptorAllocationCounters();
+
+    size_t releases;
+
+
+    auto memory =
+        cast(ushort*) malloc(8 * ushort.sizeof);
+
+    assert(memory !is null);
+
+
+    ResourceEntry raw =
+        ResourceEntry(
+            memory,
+            8 * ushort.sizeof,
+            &releases,
+            &releaseCountedImportResource
+        );
+
+
+    {
+        OwnedByteResource resource;
+
+        assert(
+            tryAdoptResourceEntryAssumeOwned(
+                raw,
+                resource
+            )
+        );
+
+
+        RasterLease!ushort lease;
+
+
+        const result =
+            importSingleOwnedResourceWithDescriptorOps!ushort(
+                resource,
+                [
+                    PlaneByteLayout(
+                        0,
+                        3,
+                        2
+                    )
+                ],
+                Region2D(
+                    0,
+                    0,
+                    4,
+                    2
+                ),
+                lease,
+                &countDescriptorAllocation,
+                &countDescriptorFree
+            );
+
+
+        assert(
+            result.error
+            == SingleResourceRasterImportError
+                .planeLayoutConversionFailed
+        );
+
+        assert(resource.ownsResource);
+        assert(!lease.hasBacking);
+
+        assert(descriptorAllocationCalls == 1);
+        assert(descriptorFreeCalls == 1);
+
+        assert(releases == 0);
+    }
+
+
+    assert(releases == 1);
 }
 
 
