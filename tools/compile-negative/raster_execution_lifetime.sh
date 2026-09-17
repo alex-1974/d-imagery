@@ -162,6 +162,24 @@ MirUniversalPlane!ubyte escapedType;
 D
 
 
+cat > "$tmp_dir/fixed_lane_external_surface.d" <<'D'
+module raster_execution_negative_fixed_lane_external_surface;
+
+/*
+ * MUST FAIL.
+ *
+ * Fixed-lane execution kernels are package-internal implementation details.
+ * Code outside imagery.raster must not acquire the specialized reduction
+ * entry point directly.
+ */
+import imagery.raster.internal.fixed_lane_kernels :
+    fixedLane4SumFloatToDoubleContiguous1D;
+
+alias escapedFixedLaneReduction =
+    fixedLane4SumFloatToDoubleContiguous1D;
+D
+
+
 compile_probe()
 {
     name="$1"
@@ -214,6 +232,7 @@ echo "compiler=$compiler"
 compile_probe positive pass
 compile_probe return_mir reject
 compile_probe external_surface reject
+compile_probe fixed_lane_external_surface reject
 
 echo "FAILURES=$failures"
 
