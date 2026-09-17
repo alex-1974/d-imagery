@@ -1108,9 +1108,17 @@ Conceptually:
 ```d
 struct OwnedRasterImportResult
 {
-    OwnedRasterImportError error;
+private:
+    OwnedRasterImportError error_;
 
-    size_t planeIndex = size_t.max;
+    size_t planeIndex_ = size_t.max;
+
+    OwnedRasterResourceDisposition resourceDisposition_;
+
+public:
+    @property OwnedRasterImportError error() const;
+
+    @property size_t planeIndex() const;
 
     @property bool ok() const;
 
@@ -1119,14 +1127,38 @@ struct OwnedRasterImportResult
 }
 ```
 
-The disposition may be derived from the stable public error category rather
-than stored independently.
+The resource disposition is stored explicitly in the result produced by the
+import implementation.
 
-This prevents contradictory states such as:
+It must not be derived solely from the public error category.
+
+The reason is that one public error category can intentionally abstract
+multiple internal failures that occur on different sides of the ownership
+commit point.
+
+For example:
 
 ```text
-error says success
-disposition says unchanged
+descriptor scratch metadata size overflow
+    -> internalConstructionFailure
+    -> PRE-COMMIT
+    -> unchanged
+
+unexpected retained-construction invariant failure
+    -> internalConstructionFailure
+    -> POST-COMMIT
+    -> releasedAfterCommit
+```
+
+Therefore the public mapper must construct the error category and resource
+disposition together from the internal result and its known ownership phase.
+
+The result fields remain private so callers cannot create contradictory
+combinations such as:
+
+```text
+error == none
+resourceDisposition == unchanged
 ```
 
 ## Pre-commit errors
@@ -1317,3 +1349,65 @@ Before the C6 public API is considered complete, implementation must prove:
 
 10. all previous construction, ownership and lifetime compile probes remain
     green under both DMD and LDC.
+
+## C6.4a explicit disposition correction
+
+The C6.4 review identified one ambiguity before implementation.
+
+`OwnedRasterImportError` is intentionally a higher-level abstraction over
+several internal failure categories. Consequently an error value alone does
+not always identify whether ownership crossed the commit point.
+
+The public result therefore stores resource disposition explicitly.
+
+The internal-to-public mapping must set both values atomically.
+
+The essential mapping is:
+
+```text
+internal failure                              public error
+                                              disposition
+--------------------------------------------------------------------------
+
+emptyResource                                emptyResource
+                                              unchanged
+
+outputLeaseNotEmpty                          outputLeaseNotEmpty
+                                              unchanged
+
+noPlanes                                     noPlanes
+                                              unchanged
+
+descriptorMetadataSizeOverflow               internalConstructionFailure
+                                              unchanged
+
+descriptorMetadataAllocationFailed           temporaryMetadataAllocationFailed
+                                              unchanged
+
+planeLayoutConversionFailed                  invalidPlaneLayout
+                                              unchanged
+
+backingValidationFailed                      invalidBackingLayout
+                                              unchanged
+
+retained construction:
+  resourceMetadataAllocationFailed           backingAllocationFailed
+  descriptorMetadataAllocationFailed          releasedAfterCommit
+
+retained construction:
+  validationFailed
+  resourceMetadataSizeOverflow
+  descriptorMetadataSizeOverflow
+  other unexpected invariant failure         internalConstructionFailure
+                                              releasedAfterCommit
+
+success                                      none
+                                              transferredToLease
+```
+
+This preserves the stable public error vocabulary while making the ownership
+state unambiguous.
+
+The public `OwnedRasterImportResult` should expose its state through read-only
+properties. Construction of arbitrary error/disposition combinations should
+remain internal to the raster package.
