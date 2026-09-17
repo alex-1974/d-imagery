@@ -885,3 +885,435 @@ The wrapper does not expose:
 - allocator hooks;
 - release callbacks;
 - release contexts.
+
+## C6.4 public owned-raster import API contract
+
+The internal retained-import machinery is now sufficiently isolated and tested
+to define its public surface.
+
+C6.4 first freezes the public contract before exporting implementation
+symbols.
+
+### Public goal
+
+After a caller has safely encapsulated an external allocation in
+OwnedByteResource, constructing a read-only retained raster should require no
+further raw-pointer operations.
+
+The intended safety transition is:
+
+```text
+raw external allocation
+        |
+        | explicit @system ownership claim
+        v
+OwnedByteResource
+        |
+        | public @safe raster import
+        v
+RasterLease!T
+        |
+        | lifetime-checked borrow
+        v
+RasterView!T
+```
+
+The raw pointer ownership claim remains inherently `@system`.
+
+The raster import itself can be `@safe` because all raw storage operations are
+contained behind the audited package-internal import boundary.
+
+## Public function
+
+The intended public spelling is:
+
+```d
+OwnedRasterImportResult tryImportOwnedRaster(T)(
+    ref OwnedByteResource resource,
+    scope const(PlaneByteLayout)[] planes,
+    Region2D residentRegion,
+    ref RasterLease!T lease
+)
+@safe;
+```
+
+The exact implementation is added only after this contract is accepted by the
+existing DMD/LDC validation matrix.
+
+### Why `tryImportOwnedRaster`
+
+The name communicates three properties:
+
+1. the source is already an explicit ownership token;
+2. raster construction may fail;
+3. ownership effects on failure are defined transactionally.
+
+The function does not accept a naked pointer.
+
+## Output lease
+
+`lease` must be empty on entry.
+
+It is passed by `ref`, never by `out`.
+
+A non-empty lease is rejected before any ownership transition.
+
+On success:
+
+```text
+resource.ownsResource == false
+lease.hasBacking       == true
+```
+
+The resulting RasterLease owns the retained backing.
+
+## Public error abstraction
+
+Internal implementation errors must not become part of the stable public API.
+
+In particular the public package does not export:
+
+- PlaneByteLayoutConversionError;
+- PlaneByteLayoutConversionResult;
+- BackingValidationError;
+- BackingValidationResult;
+- RasterConstructionError;
+- SingleResourceRasterImportError;
+- SingleResourceRasterImportResult.
+
+Instead the public API exposes a stable import-oriented error vocabulary.
+
+Conceptually:
+
+```d
+enum OwnedRasterImportError : ubyte
+{
+    none,
+
+    emptyResource,
+
+    outputLeaseNotEmpty,
+
+    noPlanes,
+
+    temporaryMetadataAllocationFailed,
+
+    invalidPlaneLayout,
+
+    invalidBackingLayout,
+
+    backingAllocationFailed,
+
+    internalConstructionFailure
+}
+```
+
+The distinction is semantic rather than a one-to-one export of internal enums.
+
+## Error mapping
+
+The public mapping is:
+
+```text
+internal                                      public
+----------------------------------------------------------------------
+emptyResource                              -> emptyResource
+
+outputLeaseNotEmpty                        -> outputLeaseNotEmpty
+
+noPlanes                                   -> noPlanes
+
+descriptorMetadataAllocationFailed         -> temporaryMetadataAllocationFailed
+
+planeLayoutConversionFailed                -> invalidPlaneLayout
+
+backingValidationFailed                    -> invalidBackingLayout
+
+retained construction:
+  resourceMetadataAllocationFailed
+  descriptorMetadataAllocationFailed       -> backingAllocationFailed
+
+retained construction:
+  unexpected validation failure
+  unexpected metadata-size overflow
+  other impossible/invariant failures      -> internalConstructionFailure
+```
+
+The public surface therefore exposes actionable categories without leaking
+construction-layer implementation details.
+
+## Plane index
+
+For `invalidPlaneLayout`, the public result should expose the zero-based logical
+plane index that failed conversion.
+
+Conceptually:
+
+```d
+size_t planeIndex;
+```
+
+For errors that do not identify one plane:
+
+```text
+planeIndex == size_t.max
+```
+
+The detailed package-internal byte-layout error remains internal for now.
+
+This avoids freezing low-level conversion diagnostics prematurely.
+
+## Resource disposition
+
+A caller must be able to determine whether the physical ownership obligation
+still exists after a failed import.
+
+The public result therefore exposes a derived resource disposition.
+
+Conceptually:
+
+```d
+enum OwnedRasterResourceDisposition : ubyte
+{
+    unchanged,
+
+    transferredToLease,
+
+    releasedAfterCommit
+}
+```
+
+The mapping is:
+
+```text
+success
+    -> transferredToLease
+
+all PRE-COMMIT failures
+    -> unchanged
+
+recoverable retained-construction failure after ownership commit
+    -> releasedAfterCommit
+```
+
+This is an important part of the API contract.
+
+A caller must not infer ownership merely from whether the operation returned an
+error.
+
+## Result object
+
+Conceptually:
+
+```d
+struct OwnedRasterImportResult
+{
+    OwnedRasterImportError error;
+
+    size_t planeIndex = size_t.max;
+
+    @property bool ok() const;
+
+    @property
+    OwnedRasterResourceDisposition resourceDisposition() const;
+}
+```
+
+The disposition may be derived from the stable public error category rather
+than stored independently.
+
+This prevents contradictory states such as:
+
+```text
+error says success
+disposition says unchanged
+```
+
+## Pre-commit errors
+
+All caller-controlled representation and geometry failures occur before
+ownership transfer.
+
+Therefore these preserve the original OwnedByteResource:
+
+```text
+emptyResource
+outputLeaseNotEmpty
+noPlanes
+temporaryMetadataAllocationFailed
+invalidPlaneLayout
+invalidBackingLayout
+```
+
+For all of them:
+
+```text
+resourceDisposition == unchanged
+```
+
+and, when the input resource was initially armed:
+
+```text
+resource.ownsResource == true
+```
+
+## Post-commit errors
+
+Once complete input validation has succeeded, the implementation commits the
+physical ownership obligation to retained construction.
+
+A later retained backing metadata allocation failure may then release the
+resource without publishing a RasterLease.
+
+The public API reports this explicitly as:
+
+```text
+backingAllocationFailed
+resourceDisposition == releasedAfterCommit
+```
+
+An unexpected invariant failure after commit is reported as:
+
+```text
+internalConstructionFailure
+resourceDisposition == releasedAfterCommit
+```
+
+The caller must not attempt to release the original physical allocation after
+either result.
+
+## Success
+
+Success means:
+
+```text
+error == none
+resourceDisposition == transferredToLease
+resource.ownsResource == false
+lease.hasBacking == true
+```
+
+The physical allocation remains alive until the last RasterLease retaining the
+RasterBacking is destroyed.
+
+## Public safety
+
+The public function should be declared `@safe`.
+
+This is deliberate.
+
+The unsafe claim occurred earlier when the external allocation was adopted:
+
+```d
+tryAdoptMallocResource(...)
+@system
+```
+
+After a valid OwnedByteResource exists, the public import operation manipulates
+only:
+
+- ownership tokens;
+- value metadata;
+- checked region geometry;
+- a RasterLease output target.
+
+All raw pointer access remains behind the already-audited package-level
+`@trusted` join.
+
+A compile-time probe must prove that ordinary `@safe` code can call
+tryImportOwnedRaster once it has an OwnedByteResource supplied by its caller.
+
+## Public ownership contract
+
+The resulting API can be summarized as:
+
+```text
+PRE-COMMIT failure
+    resource preserved
+
+SUCCESS
+    resource moved into RasterLease
+
+POST-COMMIT failure
+    resource released exactly once
+```
+
+This contract is independent of the current internal implementation structure
+and should remain stable if the retained backing implementation is later
+refactored.
+
+## Single-resource scope
+
+The first public function supports exactly one physical OwnedByteResource.
+
+Multiple PlaneByteLayout entries may reference different byte offsets within
+that resource.
+
+This supports:
+
+- single-band buffers;
+- interleaved RGB/RGBA;
+- single-allocation planar layouts;
+- decoder outputs backed by one allocation.
+
+Multiple independently owned physical allocations remain a later extension.
+
+The future multi-resource API should preserve the same transactional concepts
+but must define disposition for each ownership token or for an aggregate
+ownership object.
+
+## Borrowed storage
+
+Pure borrowed raster construction remains a separate API family.
+
+It must not reuse OwnedByteResource and must not install a no-op release
+callback.
+
+The retained-import API defined here does not imply ownership semantics for
+borrowed storage.
+
+## Mutability
+
+The public retained import creates the existing read-only RasterLease /
+RasterView capability.
+
+It does not grant MutableRasterView access even if the underlying physical
+allocation happens to be writable.
+
+Mutable import remains a separate later capability boundary.
+
+## Required public API tests
+
+Before the C6 public API is considered complete, implementation must prove:
+
+1. `tryImportOwnedRaster` is callable from `@safe` code.
+
+2. raw ResourceEntry and release callback/context state remain inaccessible
+   through the public imagery.raster package.
+
+3. success reports:
+   - error == none;
+   - transferredToLease;
+   - source token disarmed;
+   - output lease armed.
+
+4. invalidPlaneLayout reports:
+   - correct plane index;
+   - unchanged;
+   - source token still armed;
+   - output lease empty.
+
+5. invalidBackingLayout reports unchanged ownership.
+
+6. temporaryMetadataAllocationFailed reports unchanged ownership.
+
+7. outputLeaseNotEmpty leaves both existing lease and candidate resource
+   unchanged.
+
+8. backingAllocationFailed reports releasedAfterCommit.
+
+9. no public error type exposes RasterConstructionError or
+   BackingValidationResult.
+
+10. all previous construction, ownership and lifetime compile probes remain
+    green under both DMD and LDC.
