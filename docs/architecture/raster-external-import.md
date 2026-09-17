@@ -668,3 +668,79 @@ PlaneDescriptor
 
 C6.3 will be the first layer that transactionally joins ownership and converted
 layout metadata.
+
+## C6.3 implementation: transactional single-resource join
+
+C6.3 introduces the first transactional join of ownership and layout metadata.
+
+The implementation remains package-internal while the final public result and
+error surface is reviewed.
+
+The phases are:
+
+```text
+OwnedByteResource armed
+        |
+        | temporary descriptor allocation
+        | PlaneByteLayout conversion
+        |
+        | PRE-COMMIT
+        | failures preserve OwnedByteResource
+        v
+all PlaneDescriptors valid
+        |
+        | relinquishResource()
+        |
+        | COMMIT POINT
+        v
+constructRetainedRaster()
+        |
+        +--> success
+        |      RasterLease owns physical resource
+        |
+        `--> failure
+               construction releases physical resource
+               no RasterLease is published
+```
+
+### Pre-commit failures
+
+These leave the ownership token unchanged:
+
+- empty plane-layout list;
+- temporary descriptor metadata size overflow;
+- temporary descriptor allocation failure;
+- any PlaneByteLayout conversion failure;
+- non-empty RasterLease output target.
+
+### Post-commit failures
+
+After `relinquishResource()` the caller token is disarmed.
+
+The raw ResourceEntry is immediately passed into the already-tested
+transactional retained-construction layer.
+
+If backing validation or retained metadata construction fails, that layer
+releases the physical resource exactly once.
+
+### Output target
+
+The package-internal join takes RasterLease by `ref`, not `out`.
+
+As with OwnedByteResource adoption, a live ownership-bearing object must never
+be implicitly reset merely because it is used as a function output target.
+
+The current implementation requires the RasterLease target to be empty.
+
+### Public API status
+
+C6.3 does not yet freeze the public import function name or public error model.
+
+The next review should decide whether the public API exposes:
+
+- a `try...` function with an explicit result object;
+- a returned result carrying the RasterLease;
+- or another ownership-preserving spelling.
+
+The transactional implementation underneath that surface is now independent
+of that choice.

@@ -133,6 +133,30 @@ public:
 package(imagery.raster):
 
     /++
+        Returns the physical resource base while this token remains armed.
+
+        Package-internal import adapters use this only for checked layout
+        conversion before ownership is relinquished.
+
+        The pointer is valid only while this OwnedByteResource continues to own
+        the corresponding resource.
+
+        This deliberately remains @system because it exposes a raw physical
+        address.
+    +/
+    @property
+    const(void)* resourceBase() const
+    @system
+    nothrow
+    @nogc
+    {
+        assert(armed_);
+
+        return resource_.base;
+    }
+
+
+    /++
         Transfers the raw release obligation out of this ownership token.
 
         After this operation the OwnedByteResource is disarmed.
