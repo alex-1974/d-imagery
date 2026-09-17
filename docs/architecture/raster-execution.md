@@ -851,3 +851,41 @@ The validated adapter properties include:
 
 `dub.selections.json` remains a local DUB resolution artifact for this library
 and is not part of the repository contract.
+
+## E3 scalar reference reduction baseline
+
+E3 introduces internal scalar reference kernels on top of the E2 Mir execution
+representations.
+
+The initial reference reduction is scalar summation with an explicit caller
+selected accumulator type.
+
+The execution layer deliberately does not choose numeric widening or
+floating-point precision policy. For example, callers may select `ulong` for
+small unsigned integer samples or `double` for floating-point samples.
+
+Arithmetic otherwise follows the normal D semantics of the selected
+accumulator type.
+
+Reduction identity values are operation semantics, not D default
+initializers. Scalar summation therefore starts from explicit numeric zero
+rather than `Accumulator.init`; floating-point `.init` is NaN in D.
+
+The E3 baseline provides separate entry points for:
+
+- Universal 2D;
+- Canonical 2D;
+- Contiguous 2D;
+- flat Contiguous 1D.
+
+At this stage there is deliberately no automatic RasterView dispatch, public
+operation abstraction, SIMD specialization, parallel execution, or scheduler.
+
+The four execution paths must agree for equivalent logical samples. The scalar
+implementations therefore serve as the correctness reference for later fast
+paths and code-generation work.
+
+This first E3 baseline is intentionally read-only and reduction-oriented.
+A genuine pointwise `pixel -> pixel` kernel is deferred until the execution
+architecture defines a mutable destination representation rather than
+implicitly weakening the read-only `RasterView` contract.
