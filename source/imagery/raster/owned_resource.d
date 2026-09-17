@@ -166,7 +166,12 @@ package(imagery.raster):
 /++
     Package-internal raw ownership-token construction.
 
-    The caller transfers one complete ResourceEntry release obligation.
+    On success the caller transfers one complete ResourceEntry release
+    obligation.
+
+    `owned` must be empty. If it is already armed, the function returns false
+    without modifying either ownership obligation; the supplied ResourceEntry
+    remains caller-owned.
 
     This function can validate structural requirements such as non-null base
     and release function, but it cannot prove releaseContext lifetime or the
@@ -177,12 +182,25 @@ package(imagery.raster):
 package(imagery.raster)
 bool tryAdoptResourceEntryAssumeOwned(
     ResourceEntry resource,
-    out OwnedByteResource owned
+    ref OwnedByteResource owned
 )
 @system
 nothrow
 @nogc
 {
+    /*
+     * Ownership adoption never replaces an existing release obligation.
+     *
+     * In particular this API deliberately uses `ref`, not `out`: D initializes
+     * an out argument to T.init on function entry, which is not an acceptable
+     * operation for an already armed RAII ownership token.
+     */
+    if (owned.ownsResource)
+    {
+        return false;
+    }
+
+
     if (
         resource.base is null
         || resource.releaseFn is null
@@ -226,10 +244,20 @@ nothrow
 
     On success ownership of `base` transfers to `owned`.
 
+    `owned` must be empty. Adoption never replaces an existing release
+    obligation.
+
+    If `owned` already owns a resource, the function returns false, leaves
+    `owned` unchanged, and ownership of `base` remains with the caller.
+
     The caller must not free or otherwise release `base` after a successful
     call.
 
     A null base is rejected and no ownership transfer occurs.
+
+    This API deliberately uses a `ref` output target rather than `out`.
+    Resetting an already-live ownership token to `.init` would bypass its
+    release transition.
 
     The function is @system because the library cannot prove that:
 
@@ -243,7 +271,7 @@ nothrow
 bool tryAdoptMallocResource(
     void* base,
     size_t byteLength,
-    out OwnedByteResource owned
+    ref OwnedByteResource owned
 )
 @system
 nothrow
@@ -503,6 +531,163 @@ unittest
     );
 
     assert(!resource.ownsResource);
+}
+
+
+unittest
+{
+    /*
+     * Adoption into an already armed token must fail without replacing or
+     * releasing the existing ownership obligation.
+     *
+     * The candidate resource must remain caller-owned on failure.
+     */
+
+    size_t existingReleases;
+    size_t candidateReleases;
+
+
+    void* existingMemory =
+        malloc(8);
+
+    void* candidateMemory =
+        malloc(12);
+
+    assert(existingMemory !is null);
+    assert(candidateMemory !is null);
+
+
+    ResourceEntry existing =
+        ResourceEntry(
+            existingMemory,
+            8,
+            &existingReleases,
+            &releaseCountedResource
+        );
+
+    ResourceEntry candidate =
+        ResourceEntry(
+            candidateMemory,
+            12,
+            &candidateReleases,
+            &releaseCountedResource
+        );
+
+
+    {
+        OwnedByteResource owned;
+
+        assert(
+            tryAdoptResourceEntryAssumeOwned(
+                existing,
+                owned
+            )
+        );
+
+        assert(owned.ownsResource);
+        assert(owned.byteLength == 8);
+
+        assert(existingReleases == 0);
+        assert(candidateReleases == 0);
+
+
+        /*
+         * MUST FAIL transactionally:
+         *
+         * - existing ownership remains armed;
+         * - existing resource is not released;
+         * - candidate resource is not adopted or released.
+         */
+        assert(
+            !tryAdoptResourceEntryAssumeOwned(
+                candidate,
+                owned
+            )
+        );
+
+        assert(owned.ownsResource);
+        assert(owned.byteLength == 8);
+
+        assert(existingReleases == 0);
+        assert(candidateReleases == 0);
+
+
+        /*
+         * Candidate remained caller-owned.
+         */
+        candidate.releaseFn(
+            candidate.releaseContext,
+            candidate.base,
+            candidate.byteLength
+        );
+
+        candidate =
+            ResourceEntry.init;
+
+        assert(candidateReleases == 1);
+        assert(existingReleases == 0);
+    }
+
+
+    /*
+     * Existing resource is released exactly once by the token destructor.
+     */
+    assert(existingReleases == 1);
+    assert(candidateReleases == 1);
+}
+
+
+unittest
+{
+    /*
+     * An invalid public adoption attempt must not clear an armed token either.
+     */
+
+    size_t releases;
+
+    void* memory =
+        malloc(10);
+
+    assert(memory !is null);
+
+
+    ResourceEntry existing =
+        ResourceEntry(
+            memory,
+            10,
+            &releases,
+            &releaseCountedResource
+        );
+
+
+    {
+        OwnedByteResource owned;
+
+        assert(
+            tryAdoptResourceEntryAssumeOwned(
+                existing,
+                owned
+            )
+        );
+
+        assert(owned.ownsResource);
+
+
+        assert(
+            !tryAdoptMallocResource(
+                null,
+                99,
+                owned
+            )
+        );
+
+        assert(owned.ownsResource);
+        assert(owned.byteLength == 10);
+        assert(releases == 0);
+    }
+
+
+    assert(releases == 1);
 }
 
 

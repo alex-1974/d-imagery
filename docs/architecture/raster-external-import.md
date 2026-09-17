@@ -541,3 +541,37 @@ C6.1 deliberately does not yet implement:
 - borrowed storage.
 
 Those belong to later C6 implementation steps.
+
+## C6.1 adoption-target semantics
+
+OwnedByteResource adoption uses a `ref` target, never an `out` target.
+
+This is an ownership requirement rather than a stylistic API choice.
+
+D initializes an `out` argument to `T.init` when the function is entered.
+That operation is unsuitable for an RAII ownership token because an existing
+release obligation must never be erased by resetting the token state.
+
+The adoption rule is therefore:
+
+```text
+empty target + valid candidate
+    -> adopt candidate
+
+armed target
+    -> reject
+    -> existing target unchanged
+    -> candidate remains caller-owned
+
+invalid candidate
+    -> reject
+    -> target unchanged
+```
+
+Adoption never means "replace".
+
+A caller that intentionally wants to replace an owned resource must first end
+or explicitly transfer the old ownership obligation and only then perform a
+new adoption.
+
+This keeps every ownership transition explicit and exact-once.
