@@ -117,3 +117,18 @@ jobs:
         shell: bash
         run: |
           tools/compile-negative/raster_import_public.sh "$DC"
+
+      - name: Raster execution lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_execution_lifetime.sh "$DC"
+
+      - name: Raster target lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_target_lifetime.sh "$DC"
+
+      - name: Raster writable-view lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_writable_view_lifetime.sh "$DC"
