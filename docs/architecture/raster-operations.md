@@ -944,6 +944,264 @@ mechanics.
 The next useful test of the operation model is a third operation with different
 requirements.
 
+## E5.2 shared-helper decision
+
+E5.1 found no new production helper justified by the existing reduction and
+copy dispatchers.
+
+The already existing shared mechanisms are sufficient:
+
+```text
+RasterView
+RasterTargetPlane
+PlaneExecutionTraits
+tryPlaneExecutionTraits
+```
+
+No additional generic dispatcher, operation result, policy type, planner, or
+capability wrapper is introduced.
+
+E5.2 therefore has no production-code change.
+
+This is intentional. A third operation is required before reconsidering which
+mechanics are genuinely reusable.
+
+## E5.3 third-operation test: exact ubyte-to-float conversion
+
+The third operation used to test the E5 model is an exact pointwise conversion:
+
+```text
+RasterView!ubyte
+        |
+        v
+numeric widening
+        |
+        v
+RasterTargetPlane!float
+```
+
+### Semantic contract
+
+For each logical source sample:
+
+```text
+target = cast(float) source
+```
+
+Every `ubyte` value is in the integer range:
+
+```text
+0 .. 255
+```
+
+and every value in that range is exactly representable as IEEE-754 binary32.
+
+The initial operation therefore requires no:
+
+```text
+rounding policy
+clamping policy
+NaN policy
+infinity policy
+overflow policy
+```
+
+This makes the operation useful as a test of the operation architecture without
+introducing unrelated conversion-policy complexity.
+
+### Initial execution scope
+
+The first implementation remains deliberately narrow:
+
+```text
+source sample
+    ubyte
+
+target sample
+    float
+
+source capability
+    flat Contiguous 1D
+
+target capability
+    contiguous
+
+shape
+    source and target logical width/height must match
+
+empty
+    matching empty shapes succeed as a no-op
+```
+
+The source capability may be widened later only when a concrete need justifies
+the additional dispatch paths.
+
+### Source/target relation
+
+Unlike same-type copy, the source and target byte extents differ.
+
+For N logical samples:
+
+```text
+source bytes
+    N * ubyte.sizeof
+
+target bytes
+    N * float.sizeof
+```
+
+A correct in-place traversal cannot generally be assumed when those physical
+ranges overlap.
+
+The initial operation therefore requires proven physical non-overlap before the
+first target write.
+
+Conceptually:
+
+```text
+sourceBase + sourceByteLength
+targetBase + targetByteLength
+        |
+        v
+checked physical relation
+        |
+        +-- overlap
+        |      -> fail before write
+        |
+        +-- unrepresentable
+        |      -> fail before write
+        |
+        `-- non-overlapping
+               -> execute conversion kernel
+```
+
+This is intentionally the second real operation requiring a physical
+source/target relation.
+
+### Potential shared byte-range mechanism
+
+E5.3 is the point at which factoring the physical range proof may become
+justified.
+
+The existing copy implementation currently combines:
+
+```text
+pointer-to-address conversion
+byte-length arithmetic
+range-end overflow validation
+half-open interval comparison
+copy execution
+```
+
+inside one narrow trusted helper.
+
+For ubyte-to-float conversion the relation calculation is structurally similar,
+but the successful action is not `memcpy` and the two ranges have different
+byte lengths.
+
+That suggests a possible lower-level abstraction:
+
+```text
+physicalByteRangeRelation(
+    sourceBase,
+    sourceByteLength,
+    targetBase,
+    targetByteLength
+)
+```
+
+with a result conceptually equivalent to:
+
+```text
+overlapping
+nonOverlapping
+unrepresentable
+```
+
+However E5.3 must not introduce that helper merely from design symmetry.
+
+The implementation sequence is:
+
+```text
+1. implement the conversion with its own complete checked path
+2. verify safety and semantics
+3. compare its relation logic with checked copy
+4. factor only the truly identical relation mechanism
+5. rerun both operation test suites
+```
+
+This preserves the E5 rule that abstraction follows demonstrated duplication.
+
+### Reference execution
+
+The first kernel is a scalar reference conversion.
+
+Conceptually:
+
+```text
+foreach (i; 0 .. sampleCount)
+    target[i] = cast(float) source[i];
+```
+
+The kernel itself should operate only after shape, capability, and alias
+preconditions are satisfied.
+
+It does not decide:
+
+```text
+plane validity
+shape validity
+empty behavior
+alias policy
+execution capability
+```
+
+Those remain dispatcher responsibilities.
+
+### Numeric semantics
+
+Unlike fixed-lane floating-point reduction, this conversion does not change an
+arithmetic operation graph.
+
+For every valid source sample:
+
+```text
+cast(float) ubyte
+```
+
+is exact.
+
+A later SIMD implementation is therefore permitted only if it preserves the
+same per-sample value mapping exactly.
+
+No separate fast numeric semantic is required for this operation.
+
+### Expected E5.3 implementation stages
+
+```text
+E5.3a
+    scalar flat-contiguous ubyte-to-float reference kernel
+
+E5.3b
+    checked operation dispatcher
+    shape / empty / capability / non-overlap semantics
+
+E5.3c
+    compare physical-range logic with checked copy
+    factor a shared helper only if the duplication is exact
+
+E5.3d
+    inspect LDC code generation and benchmark
+    add specialization only if evidence supports one
+
+E5.3e
+    re-audit reduction, copy, and conversion against the E5 model
+```
+
+The operation remains package-internal throughout E5.3.
+
+It is not yet evidence for a public conversion API.
+
 ## E5.0 decision
 
 The raster engine uses a common conceptual operation pipeline but retains
