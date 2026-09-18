@@ -1124,7 +1124,7 @@ fast-math reduction
     research/performance upper bound only
 
 known-non-overlap copy
-    viable future execution specialization
+    implemented in E4.3b after checked pairwise non-overlap proof
 
 general target == noalias
     false
@@ -1240,13 +1240,17 @@ A narrow trusted boundary converts the already validated source and target
 pointers to the project's flat integer-address representation and checks byte
 length and interval-end arithmetic for overflow.
 
-The relation has three internal outcomes:
+At the E4.3a stage the checked relation had three internal outcomes:
 
 ```text
 overlapping
 non-overlapping
 unrepresentable
 ```
+
+E4.3b subsequently folded the successful non-overlap outcome into the checked
+copy action itself: successful proof and `memcpy` now occur within the same
+narrow trusted boundary.
 
 Overlap and unrepresentable address ranges fail before the first target write.
 
@@ -1345,3 +1349,26 @@ contract, while the implementation delegates size-specific copy strategy to
 the platform `memcpy`.
 
 The public raster API remains unchanged.
+
+### E4 completion
+
+E4 establishes two production examples of evidence-driven specialization with
+different semantic constraints:
+
+```text
+reduction
+    numeric semantics are explicit
+    execution layout selects only compatible kernels
+    fixedLane4 never silently replaces strict
+
+copy
+    target mutability does not imply uniqueness
+    non-overlap is proved for the concrete source/target pair
+    memcpy is reached only after that proof
+```
+
+These examples are sufficient to design the next operation layer from actual
+requirements rather than introducing further speculative specialization.
+
+Further SIMD, aliasing, numeric, parallel, or GPU specializations should be
+added only when another concrete operation and measurement justify them.
