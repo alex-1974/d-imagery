@@ -1,6 +1,6 @@
-# d-imagery
+# imagery-d
 
-`d-imagery` is an experimental high-performance image engine written in D,
+`imagery-d` is an experimental high-performance image engine written in D,
 designed primarily for large geospatial imagery such as aerial photographs,
 orthophotos and satellite imagery.
 

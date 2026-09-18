@@ -2,7 +2,7 @@
 
 Status: **ACTIVE**
 
-This document records the memory-view experiments for `d-imagery`.
+This document records the memory-view experiments for `imagery-d`.
 
 The first part of R0.2 investigates the representation and traversal of
 resident raster data. Later R0.2 work will investigate channel layout,
@@ -21,11 +21,11 @@ The initial view experiment asks:
    generic strided representation?
 6. Does native CPU targeting benefit the competing representations equally?
 
-The experiment intentionally does not define the public `d-imagery` API.
+The experiment intentionally does not define the public `imagery-d` API.
 
 ## 2. Architectural context
 
-`d-imagery` must distinguish several concepts that are often incorrectly
+`imagery-d` must distinguish several concepts that are often incorrectly
 collapsed into a single "tile" abstraction:
 
 ```text
@@ -439,7 +439,7 @@ is not supported by the measurements.
 Use Mir as the leading candidate for the **internal resident view substrate**:
 
 ```text
-public d-imagery semantics
+public imagery-d semantics
         |
         v
 internal RasterView abstraction
@@ -749,7 +749,7 @@ This keeps the kernel-facing type small and independent of storage policy.
 
 ### Retainable storage
 
-Memory that d-imagery can retain or release uses a separate storage control
+Memory that imagery-d can retain or release uses a separate storage control
 object.
 
 The experimental minimum was:
@@ -875,7 +875,7 @@ scope callback
 RasterView
 ```
 
-A foreign pointer should become a `RasterLease` only when d-imagery has a
+A foreign pointer should become a `RasterLease` only when imagery-d has a
 reliable retain/release or ownership contract.
 
 Otherwise it remains a synchronous borrow.
@@ -1111,7 +1111,7 @@ custom public/internal multidimensional traversal abstraction.
 The current preferred direction is:
 
 ```text
-public d-imagery semantics
+public imagery-d semantics
         |
         v
 internal RasterView
@@ -1169,7 +1169,7 @@ block representation.
 
 ### Retainable external memory
 
-External memory can participate in normal lease semantics when d-imagery has a
+External memory can participate in normal lease semantics when imagery-d has a
 reliable retention or release contract.
 
 The R0.2 probes validated:

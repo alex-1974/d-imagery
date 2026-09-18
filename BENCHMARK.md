@@ -1,4 +1,4 @@
-# d-imagery Benchmark Principles
+# imagery-d Benchmark Principles
 
 ## Purpose
 
@@ -124,7 +124,7 @@ useful.
 
 ## Reference and cross-platform benchmarking
 
-d-imagery distinguishes stable reference benchmarking from cross-platform
+imagery-d distinguishes stable reference benchmarking from cross-platform
 validation.
 
 ### Local reference platform

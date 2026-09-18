@@ -1,8 +1,8 @@
-# d-imagery Design
+# imagery-d Design
 
 ## 1. Purpose
 
-`d-imagery` is a high-performance image engine for large geospatial imagery.
+`imagery-d` is a high-performance image engine for large geospatial imagery.
 
 Its first intended consumer is an interactive OpenStreetMap editor. The engine
 must nevertheless remain independent of OSM-specific data structures and UI
@@ -137,7 +137,7 @@ R0 will compare at least:
 The public API must not expose implementation details unnecessarily.
 
 If `mir.ndslice` is selected as an internal substrate, public image semantics
-should still be represented by d-imagery types rather than leaking
+should still be represented by imagery-d types rather than leaking
 `Slice!(...)` throughout consuming applications.
 
 A likely conceptual layering is:

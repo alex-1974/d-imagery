@@ -2,7 +2,7 @@
     Internal Mir adapters for writable raster targets.
 
     Mir remains an execution substrate. These aliases and adapters are
-    package-internal and do not form part of the public d-imagery raster API.
+    package-internal and do not form part of the public imagery-d raster API.
 +/
 module imagery.raster.internal.mir_target_adapter;
 

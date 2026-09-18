@@ -491,7 +491,7 @@ void main()
     enum TRANSFORM_INNER = 8;
     enum LAYOUT_INNER = 4;
 
-    writeln("d-imagery R0.2 memory-model benchmark");
+    writeln("imagery-d R0.2 memory-model benchmark");
     writeln("======================================");
     writefln("image:       %s x %s", W, H);
     writefln("ROI:         %s x %s", ROI_W, ROI_H);

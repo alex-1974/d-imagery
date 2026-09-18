@@ -13,7 +13,7 @@ import views :
 /*
  * Mir is an internal execution substrate.
  *
- * These aliases are intentionally not part of the future public d-imagery
+ * These aliases are intentionally not part of the future public imagery-d
  * API.  They make the experiment's representation choices explicit.
  */
 alias MirUniversalPlane(T) =

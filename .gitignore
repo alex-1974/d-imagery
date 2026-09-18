@@ -22,4 +22,4 @@ __dummy.html
 *.profile
 
 # DUB generated test executables
-/d-imagery-test-library
+/imagery-d-test-library

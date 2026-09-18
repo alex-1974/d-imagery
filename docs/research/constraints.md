@@ -11,7 +11,7 @@ implementations and workloads have been benchmarked.
 
 ## 1. Primary workload
 
-d-imagery is intended to become the image engine of an interactive
+imagery-d is intended to become the image engine of an interactive
 geospatial/OSM editor.
 
 The engine must support both:

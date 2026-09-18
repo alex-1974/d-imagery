@@ -229,7 +229,7 @@ RasterView resident geometry
 PlaneDescriptor physical strides
 ```
 
-This is consistent with the broader d-imagery invariant:
+This is consistent with the broader imagery-d invariant:
 
 ```text
 ProviderTile != CacheBlock != Region != ProcessingTask

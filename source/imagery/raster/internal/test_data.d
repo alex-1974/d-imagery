@@ -1,5 +1,5 @@
 /++
-    Canonical synthetic raster data used by d-imagery unit tests.
+    Canonical synthetic raster data used by imagery-d unit tests.
 
     This module exists only in unittest builds.
 

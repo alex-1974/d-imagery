@@ -1,7 +1,7 @@
 # R0.2 External Storage and Lifetime Findings
 
 The R0.2 probes validated the ownership and borrowing model considered for
-d-imagery raster memory.
+imagery-d raster memory.
 
 ## Result
 
@@ -53,7 +53,7 @@ With both DMD 2.111.0 and LDC 1.41.0, using `-preview=dip1000`:
 
 ## Design consequence
 
-A foreign pointer may become a `RasterLease` only when d-imagery has a
+A foreign pointer may become a `RasterLease` only when imagery-d has a
 reliable ownership, retain, or release contract.
 
 Otherwise the buffer must remain a synchronous borrow.

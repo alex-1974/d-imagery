@@ -729,14 +729,14 @@ every descriptor refers to storage retained by the same representation.
 ### Mir adaptation experiment
 
 The R0.3 experiments validate Mir as an internal execution substrate without
-making Mir types part of the d-imagery raster semantic model.
+making Mir types part of the imagery-d raster semantic model.
 
 The boundary is:
 
 ```text
 MultiPlaneRasterView
         |
-        | d-imagery semantics
+        | imagery-d semantics
         v
 internal Mir adapter
         |
@@ -749,7 +749,7 @@ internal Mir adapter
 kernel implementation
 ```
 
-`PlaneDescriptor` therefore remains d-imagery metadata. An `ndslice` is an
+`PlaneDescriptor` therefore remains imagery-d metadata. An `ndslice` is an
 ephemeral execution view constructed from an already validated
 `RasterView`.
 
@@ -922,12 +922,12 @@ the final core types must make it part of the validated view invariants.
 
 The experiments support Mir as an internal substrate.
 
-They do not support exposing Mir types in the public d-imagery API.
+They do not support exposing Mir types in the public imagery-d API.
 
 The preferred relationship is:
 
 ```text
-public/internal d-imagery raster semantics
+public/internal imagery-d raster semantics
         |
         v
 validated RasterView
@@ -947,7 +947,7 @@ raw-pointer implementation.
 
 ### Final core-type synthesis
 
-R0.3 selects a provisional core type architecture for d-imagery.
+R0.3 selects a provisional core type architecture for imagery-d.
 
 The purpose of this synthesis is not to freeze the final public API.
 

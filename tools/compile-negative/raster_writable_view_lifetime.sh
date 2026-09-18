@@ -4,7 +4,7 @@ compiler="${1:-dmd}"
 
 tmp_dir="$(
     mktemp -d \
-        "/tmp/d-imagery-raster-writable-view-XXXXXX"
+        "/tmp/imagery-d-raster-writable-view-XXXXXX"
 )"
 
 cleanup()

@@ -7,7 +7,7 @@ repo_root="$(
     pwd
 )"
 
-tmp_dir="${TMPDIR:-/tmp}/d-imagery-raster-construction-lifetime-$$"
+tmp_dir="${TMPDIR:-/tmp}/imagery-d-raster-construction-lifetime-$$"
 
 mkdir -p "$tmp_dir"
 

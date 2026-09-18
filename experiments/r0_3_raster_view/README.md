@@ -1,6 +1,6 @@
 # R0.3 Raster View Experiment
 
-This experiment evaluates concrete representations for the d-imagery
+This experiment evaluates concrete representations for the imagery-d
 kernel-facing raster view.
 
 Candidates will include:

@@ -1,5 +1,5 @@
 name "r0-2-memory-model"
-description "R0.2 memory-model experiments for d-imagery"
+description "R0.2 memory-model experiments for imagery-d"
 authors "Alexander Bernardi"
 license "MIT"
 

@@ -7,7 +7,7 @@ repo_root="$(
     pwd
 )"
 
-tmp_dir="${TMPDIR:-/tmp}/d-imagery-raster-import-public-$$"
+tmp_dir="${TMPDIR:-/tmp}/imagery-d-raster-import-public-$$"
 
 mkdir -p "$tmp_dir"
 

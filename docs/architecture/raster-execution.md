@@ -5,7 +5,7 @@ Date: 2026-09-17
 
 ## 1. Purpose
 
-The raster execution layer bridges d-imagery's semantic raster representation
+The raster execution layer bridges imagery-d's semantic raster representation
 to execution-oriented representations used by hot loops.
 
 The architectural direction is:
@@ -29,7 +29,7 @@ Execution classification and execution adapters are internal implementation
 details.
 
 Mir may be used as an internal execution substrate, but Mir types must not
-become part of the public d-imagery API.
+become part of the public imagery-d API.
 
 ## 2. Scope of E1
 
@@ -644,7 +644,7 @@ Writable execution belongs to the future MutableRasterView capability.
 
 Mir is not part of E1.
 
-The root d-imagery package therefore does not need a Mir dependency merely to
+The root imagery-d package therefore does not need a Mir dependency merely to
 implement layout classification.
 
 The R0.3 research environment currently resolves:
@@ -665,7 +665,7 @@ imagery
 imagery.raster
 ```
 
-or another public d-imagery API module.
+or another public imagery-d API module.
 
 ## 17. Required E1 tests
 
@@ -814,7 +814,7 @@ unnecessary abstraction overhead
 The desired long-term execution architecture remains:
 
 ```text
-public d-imagery semantics
+public imagery-d semantics
         |
         v
 internal per-plane classification
@@ -1032,7 +1032,7 @@ LDC `@fastmath` enabled aggressive vector reduction for the same
 `float -> double` sum.
 
 This is useful as a performance upper bound, but it is not the default
-d-imagery numeric contract. LDC defines `@fastmath` more broadly than merely
+imagery-d numeric contract. LDC defines `@fastmath` more broadly than merely
 allowing reassociation, so using it would relinquish additional
 floating-point guarantees.
 

@@ -7,7 +7,7 @@ repo_root="$(
     pwd
 )"
 
-tmp_dir="${TMPDIR:-/tmp}/d-imagery-raster-execution-lifetime-$$"
+tmp_dir="${TMPDIR:-/tmp}/imagery-d-raster-execution-lifetime-$$"
 
 mkdir -p "$tmp_dir"
 
@@ -152,7 +152,7 @@ module raster_execution_negative_external_surface;
  * MUST FAIL.
  *
  * Mir execution types/adapters are package-internal implementation details,
- * not public d-imagery raster API.
+ * not public imagery-d raster API.
  */
 import imagery.raster.internal.mir_adapter :
     MirUniversalPlane,

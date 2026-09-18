@@ -2,7 +2,7 @@
 
 Disposable experiments for evaluating candidate resident-memory view models.
 
-The code in this directory is not part of the d-imagery public API.
+The code in this directory is not part of the imagery-d public API.
 
 Initial comparison:
 

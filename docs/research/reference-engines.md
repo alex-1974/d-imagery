@@ -4,7 +4,7 @@
 
 Research in progress.
 
-This document examines existing image, raster and processing engines for architectural ideas relevant to `d-imagery`.
+This document examines existing image, raster and processing engines for architectural ideas relevant to `imagery-d`.
 
 The purpose is not to select one library to imitate. Different reference systems solve different parts of the problem well.
 
@@ -84,7 +84,7 @@ Does the architecture support:
 - cancellation or reprioritization;
 - multiresolution preview?
 
-### Applicability to d-imagery
+### Applicability to imagery-d
 
 For every reference distinguish:
 
@@ -127,7 +127,7 @@ A downstream consumer requests an output area.
 
 The pipeline then generates only the pixels necessary to satisfy that demand.
 
-This is a strong candidate model for d-imagery:
+This is a strong candidate model for imagery-d:
 
     requested output region
              ↓
@@ -166,7 +166,7 @@ A major design goal is retaining only the currently useful pixel working set.
 Calculated pixel buffers may be cached, but intermediate full images do not
 need to be materialized.
 
-## Lessons for d-imagery
+## Lessons for imagery-d
 
 Strong candidates to adopt:
 
@@ -214,7 +214,7 @@ The part currently resident in memory.
 
 The part a downstream consumer requires.
 
-This distinction maps closely onto the problem d-imagery must solve.
+This distinction maps closely onto the problem imagery-d must solve.
 
 A logical image must not be confused with its resident working set.
 
@@ -254,7 +254,7 @@ OTB explicitly distinguishes streaming from threading.
 Streaming means that independently processed portions of a large image combine
 to produce the same result as processing the complete image.
 
-This directly supports a central d-imagery invariant:
+This directly supports a central imagery-d invariant:
 
     F(whole image)[R]
         ≈
@@ -267,7 +267,7 @@ Streamability is a property of the complete pipeline.
 One operation that requires the entire dataset can cause a pipeline to lose its
 bounded-memory streaming behaviour.
 
-This must be visible in d-imagery rather than occurring accidentally.
+This must be visible in imagery-d rather than occurring accidentally.
 
 ## Memory estimation
 
@@ -275,9 +275,9 @@ OTB can propagate a requested region and estimate the RAM required to process
 it.
 
 This is particularly relevant to the explicit memory-budget requirement in
-d-imagery.
+imagery-d.
 
-## Lessons for d-imagery
+## Lessons for imagery-d
 
 Strong candidates to adopt:
 
@@ -316,9 +316,9 @@ Scheduling decisions can include:
 
 Changing a schedule is intended not to change the semantic result.
 
-## Relevance to d-imagery
+## Relevance to imagery-d
 
-A d-imagery operation should not unnecessarily encode assumptions such as:
+A imagery-d operation should not unnecessarily encode assumptions such as:
 
     tile size = 512
     thread count = 8
@@ -335,7 +335,7 @@ and:
 
     execution policy
 
-This does not imply that d-imagery needs a Halide-like DSL.
+This does not imply that imagery-d needs a Halide-like DSL.
 
 ## Performance lesson
 
@@ -352,7 +352,7 @@ They should be benchmarked.
 
 This strongly supports the R0 prototype bake-off.
 
-## Lessons for d-imagery
+## Lessons for imagery-d
 
 Adopt as principles:
 
@@ -381,7 +381,7 @@ GDAL should generally be integrated rather than reimplemented.
 
 Raster drivers expose blocks appropriate to their underlying storage.
 
-Physical source block geometry must therefore remain distinct from d-imagery's
+Physical source block geometry must therefore remain distinct from imagery-d's
 logical processing regions.
 
 This reinforces the distinction:
@@ -405,7 +405,7 @@ GDAL maintains a configurable raster block cache.
 
 The cache has an explicit memory limit and evicts blocks as required.
 
-This is directly relevant to d-imagery's memory-budget model.
+This is directly relevant to imagery-d's memory-budget model.
 
 ## Virtual memory
 
@@ -414,7 +414,7 @@ is populated as memory pages are accessed.
 
 This demonstrates another possible source/backend strategy for large rasters.
 
-## Lessons for d-imagery
+## Lessons for imagery-d
 
 Adopt:
 
@@ -426,7 +426,7 @@ Adopt:
 Avoid:
 
 - coupling the processing core directly to GDAL objects;
-- treating GDAL's block cache as the complete d-imagery cache architecture.
+- treating GDAL's block cache as the complete imagery-d cache architecture.
 
 Source caching and processed-result caching solve different problems.
 
@@ -457,7 +457,7 @@ This is highly relevant to the proposed `RasterView` / `ImageView` design.
 OpenCV demonstrates the usefulness of allowing an image view to wrap memory
 owned elsewhere.
 
-Potential d-imagery producers include:
+Potential imagery-d producers include:
 
 - decoders;
 - GDAL;
@@ -474,7 +474,7 @@ packed.
 Algorithms can distinguish contiguous layouts from generic layouts and use
 faster paths where appropriate.
 
-This supports the planned d-imagery distinction between:
+This supports the planned imagery-d distinction between:
 
     generic valid view
 
@@ -487,10 +487,10 @@ and:
 OpenCV's Universal Intrinsics layer abstracts architecture-specific SIMD and
 vector-length differences.
 
-d-imagery should first evaluate LLVM auto-vectorization, but OpenCV provides a
+imagery-d should first evaluate LLVM auto-vectorization, but OpenCV provides a
 useful design reference if explicit portable SIMD becomes necessary.
 
-## Lessons for d-imagery
+## Lessons for imagery-d
 
 Adopt as principles:
 
@@ -546,7 +546,7 @@ This is relevant to editor zoom levels:
 The engine should not process full-resolution source pixels unnecessarily for a
 small on-screen representation.
 
-## Lessons for d-imagery
+## Lessons for imagery-d
 
 Potential later concepts:
 
@@ -654,7 +654,7 @@ Examples include:
 - colour conversion;
 - image display.
 
-This provides useful prior art for the d-imagery R0.2 prototype.
+This provides useful prior art for the imagery-d R0.2 prototype.
 
 ## Research value
 
@@ -675,7 +675,7 @@ DCV solves computer-vision/image-processing problems rather than large
 geospatial streaming.
 
 It should therefore be used primarily as a D implementation reference, not as
-the overall d-imagery architecture.
+the overall imagery-d architecture.
 
 ---
 
@@ -700,7 +700,7 @@ No single reference provides the complete desired architecture.
 
 ---
 
-# 11. Preliminary synthesis for d-imagery
+# 11. Preliminary synthesis for imagery-d
 
 R0.1 currently suggests the following conceptual separation:
 

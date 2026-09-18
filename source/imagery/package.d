@@ -1,5 +1,5 @@
 /++
-    d-imagery
+    imagery-d
 
     High-performance image engine for large geospatial imagery.
 

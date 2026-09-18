@@ -7,7 +7,7 @@ repo_root="$(
     pwd
 )"
 
-tmp_dir="${TMPDIR:-/tmp}/d-imagery-raster-owned-resource-$$"
+tmp_dir="${TMPDIR:-/tmp}/imagery-d-raster-owned-resource-$$"
 
 mkdir -p "$tmp_dir"
 

@@ -1,4 +1,4 @@
-# d-imagery Roadmap
+# imagery-d Roadmap
 
 ## Current implementation checkpoint — 2026-09-18
 
@@ -46,9 +46,10 @@ M2 has partial internal implementation used to validate the engine
 architecture; copy, reduction and conversion machinery are not yet exposed as
 stable public raster operations.
 
-No repository rename is performed by this checkpoint. The repository and DUB
-package still use the current `d-imagery` name until the separately coordinated
-repository/worktree reorganization.
+At this checkpoint, the coordinated repository/worktree rename had not yet been
+performed: the repository and DUB package still used the historical `d-imagery`
+name. The reorganization on 2026-09-18 subsequently renamed the project and DUB
+package to `imagery-d`.
 
 ## R0 — Constraints, Research and Architecture
 
