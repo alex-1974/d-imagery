@@ -1748,6 +1748,423 @@ The operation remains package-internal throughout E5.3.
 
 It is not yet evidence for a public conversion API.
 
+## E5.4 public raster-operation surface
+
+E5.0 through E5.3 established the internal operation model using three
+concrete operation families:
+
+```text
+reduction
+    RasterView -> scalar value
+
+copy
+    RasterView -> writable target
+
+conversion
+    RasterView!ubyte -> writable target!float
+```
+
+E5.4 now asks a different question:
+
+```text
+Which of these semantics are stable enough to expose publicly
+without freezing internal execution mechanisms into the API?
+```
+
+The answer must be derived from the implemented operations rather than from a
+generic operation hierarchy designed in advance.
+
+
+### E5.4a current public-surface audit
+
+The current `imagery.raster` package publicly exposes:
+
+```text
+isRasterSampleType
+
+OwnedByteResource
+tryAdoptMallocResource
+
+PlaneByteLayout
+
+OwnedRasterImportError
+OwnedRasterImportResult
+OwnedRasterResourceDisposition
+tryImportOwnedRaster
+
+PlaneDescriptor
+Region2D
+RasterView
+RasterLease
+```
+
+It does not expose:
+
+```text
+Mir Slice types
+Universal / Canonical / Contiguous execution layouts
+PlaneExecutionTraits
+RasterTargetPlane
+physical-range classification
+reduction dispatch
+copy dispatch
+conversion dispatch
+memcpy specialization
+compiler noalias / restrict machinery
+```
+
+This boundary is correct and must be preserved.
+
+The execution-surface compile-negative tests independently verify that the
+current reduction, copy, conversion, and physical-range machinery cannot be
+imported from modules outside `imagery.raster`.
+
+No existing internal operation type should therefore be made public merely by
+changing its visibility.
+
+
+### Writable semantic gap
+
+The current writable type is:
+
+```text
+RasterTargetPlane!T
+```
+
+It is deliberately package-internal.
+
+Its current capability is:
+
+```text
+single plane
+contiguous storage
+width / height
+flat element count
+non-owning borrow
+no uniqueness guarantee
+no non-alias guarantee
+```
+
+This is useful as an execution capability.
+
+It is not a sufficient public writable raster abstraction.
+
+A semantic public writable raster view must not imply that writable raster
+storage is necessarily:
+
+```text
+single-plane
+flat
+contiguous
+positive-stride
+represented by one D slice
+```
+
+Those are execution properties, not raster semantics.
+
+Consequently:
+
+```text
+DO NOT make RasterTargetPlane public
+DO NOT make tryBorrowContiguousTarget public
+DO NOT use RasterTargetPlane as the public destination type
+```
+
+Future operation dispatch may derive a `RasterTargetPlane` or another
+specialized writable capability internally from a more general semantic
+writable view.
+
+
+### Reduction public-surface audit
+
+Reduction differs from copy and conversion because it requires no writable
+destination:
+
+```text
+RasterView!float
+    ->
+double
+```
+
+This means reduction is not blocked by the missing writable raster abstraction.
+
+However, the current dispatcher is still not itself a suitable public API.
+
+Its current semantic selector contains:
+
+```text
+strict
+fixedLane4
+```
+
+`strict` describes externally meaningful numeric behavior.
+
+`fixedLane4` describes the concrete evaluation graph of the current optimized
+kernel. The lane count is an implementation-shaped name and should not become
+a general public raster policy accidentally.
+
+Likewise:
+
+```text
+unsupportedExecution
+```
+
+is an internal dispatch outcome caused by the currently available execution
+capabilities. It is not an inherent mathematical failure of summation.
+
+A public reduction operation should therefore not directly export:
+
+```text
+SumReductionSemantics
+FloatToDoubleSumDispatchError
+FloatToDoubleSumResult
+dispatchFloatToDoubleSum
+```
+
+The strict reduction semantics are potentially public-ready, but E5.4a does
+not yet introduce them.
+
+Public naming, result semantics, and numeric-policy vocabulary should be
+decided independently of the current dispatcher implementation.
+
+
+### Copy public-surface audit
+
+The current checked copy operation is intentionally named:
+
+```text
+tryCopyNonOverlappingContiguous1D
+```
+
+That name accurately describes the internal specialization.
+
+It should not become the semantic public copy operation.
+
+A public raster copy must define what overlap means at the semantic level.
+
+Possible public semantics include, for example:
+
+```text
+overlap is supported
+overlap is rejected as a semantic error
+source is logically snapshotted before writes
+```
+
+That decision must not be inferred from the requirements of the current
+`memcpy` specialization.
+
+Likewise, the following current errors are partly execution details:
+
+```text
+unsupportedExecution
+addressRangeUnrepresentable
+```
+
+and should not automatically become permanent public copy errors.
+
+The public contract must be designed first; internal dispatch can then choose
+between scalar traversal, memcpy-like specialization, overlap-safe execution,
+or future kernels without changing that contract.
+
+
+### Conversion public-surface audit
+
+The E5.3 conversion has a stable numeric semantic core:
+
+```text
+ubyte -> float
+
+0 .. 255
+    ->
+exact IEEE-754 binary32 value
+```
+
+The current implementation nevertheless accepts an internal contiguous
+`RasterTargetPlane!float` and can report `unsupportedExecution`.
+
+Therefore the implemented conversion proves the operation architecture, but
+does not yet define a general public conversion API.
+
+In particular, one concrete conversion is not enough evidence for a generic
+public abstraction such as:
+
+```text
+convertRaster!(Source, Target)
+GenericConversionPolicy
+GenericConversionResult
+```
+
+Such generalization remains premature.
+
+Once a public writable raster view exists, the exact `ubyte -> float`
+operation can be reconsidered as one semantic conversion without exposing its
+current flat-contiguous specialization.
+
+
+### Public errors must describe semantics, not implementation coverage
+
+The internal dispatchers correctly expose errors such as:
+
+```text
+unsupportedExecution
+addressRangeUnrepresentable
+```
+
+to package-internal callers.
+
+That does not imply those values belong in public operation results.
+
+A stable public semantic operation should generally not fail merely because
+the current fastest specialization does not support a layout if a correct
+general implementation can exist.
+
+The desired layering is:
+
+```text
+public semantic operation
+    |
+    v
+validate semantic request
+    |
+    v
+derive execution capabilities
+    |
+    +-- specialized kernel when supported
+    |
+    `-- correct general fallback when available
+```
+
+`unsupportedExecution` therefore remains an internal implementation state
+unless an operation is deliberately specified to support only a restricted
+class of raster storage.
+
+
+### E5.4a decision
+
+Current evidence supports:
+
+```text
+public RasterView                         KEEP
+public RasterLease                        KEEP
+
+internal RasterTargetPlane                KEEP INTERNAL
+internal execution layouts                KEEP INTERNAL
+internal Mir adapters                     KEEP INTERNAL
+internal physical-range machinery         KEEP INTERNAL
+
+export current reduction dispatcher       NO
+export current copy dispatcher            NO
+export current conversion dispatcher      NO
+
+generic public operation hierarchy        DO NOT ADD
+generic public conversion policy          DO NOT ADD
+public alias-proof token                   DO NOT ADD
+```
+
+No production visibility changes are justified by E5.4a.
+
+
+### Required writable abstraction
+
+Before source-to-target raster operations can become public, the raster layer
+needs a semantic writable borrowing abstraction.
+
+The working architectural role is:
+
+```text
+public semantic writable raster view
+    |
+    | validate topology, reachability and lifetime
+    v
+internal writable execution capabilities
+    |
+    +-- RasterTargetPlane when flat contiguous
+    +-- future canonical writable plane
+    `-- future universal writable plane
+```
+
+The public writable view should ultimately be able to represent the same
+logical raster concepts as `RasterView`:
+
+```text
+multiple logical planes
+Region2D geometry
+descriptor-space coordinates
+signed row stride
+signed sample stride
+empty regions
+borrowed lifetime
+```
+
+while additionally providing mutable sample access.
+
+It must not imply:
+
+```text
+unique ownership
+source/target non-aliasing
+contiguous layout
+one-plane storage
+provider-tile identity
+cache-block identity
+```
+
+Pairwise relations such as source/target overlap remain operation-local facts.
+
+
+### Naming is not yet fixed
+
+E5.4a deliberately does not commit to a public type name.
+
+Candidates such as:
+
+```text
+MutableRasterView
+RasterWriteView
+WritableRasterView
+```
+
+describe approximately the required role, but naming should follow the
+lifetime, descriptor, ownership, and read/write contract audit.
+
+The type should be designed from semantic requirements rather than by promoting
+`RasterTargetPlane`.
+
+
+### E5.4 progression
+
+The next steps are:
+
+```text
+E5.4a
+    audit current public surface
+    -> complete
+
+E5.4b
+    audit writable-raster prerequisites:
+        descriptor mutability
+        backing ownership
+        RasterLease behavior
+        construction / validation
+        lifetime constraints
+
+E5.4c
+    define semantic writable raster view
+
+E5.4d
+    derive internal writable execution capabilities from that view
+
+E5.4e
+    redesign public operation contracts independently of current dispatchers
+
+E5.4f
+    expose only operation semantics supported by stable contracts
+```
+
+Reduction may ultimately be exposable earlier than source-to-target operations,
+but E5.4a intentionally does not create a partial public operation namespace
+before the overall semantic surface has been reviewed.
+
 ## E5.0 decision
 
 The raster engine uses a common conceptual operation pipeline but retains
