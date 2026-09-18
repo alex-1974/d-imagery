@@ -1519,6 +1519,209 @@ Any compiler-specific alias specialization remains an internal execution
 detail and requires code-generation plus performance evidence before production
 adoption.
 
+### E5.3e alias-information performance audit
+
+E5.3d established that the scalar `ubyte -> float` production kernel is already
+auto-vectorized by LDC/LLVM on the tested Skylake system.
+
+LLVM nevertheless emits runtime alias versioning because the pairwise
+non-overlap fact established by the dispatcher is not represented at the
+kernel boundary.
+
+A controlled code-generation experiment compared two otherwise equivalent
+raw-pointer kernels:
+
+```text
+ordinary source/target pointers
+    -> runtime vector.memcheck
+    -> vectorized loop
+
+LDC @restrict source/target pointers
+    -> LLVM noalias parameters
+    -> no vector.memcheck
+    -> same vectorized loop
+```
+
+The restricted function therefore proves that communicating non-overlap to LLVM
+can eliminate the redundant runtime memory check.
+
+This establishes a code-generation opportunity, but not by itself a production
+optimization requirement.
+
+#### Performance experiment
+
+The current Mir-slice production kernel, an unknown-alias raw-pointer kernel,
+and an `@restrict` raw-pointer kernel were benchmarked with LDC `-O3`,
+`-release`, `-mcpu=native`.
+
+The benchmark used:
+
+```text
+9 rounds per process
+9 independent processes
+CPU affinity to one logical CPU
+rotated implementation order
+median within each process
+paired ratios across processes
+```
+
+The controlled comparison for alias information is:
+
+```text
+raw unknown alias
+    versus
+raw @restrict
+```
+
+The Mir result is retained as production context but contains additional ABI,
+slice-construction, length-check, and code-layout differences.
+
+Representative paired median results were:
+
+```text
+samples     unknown/restrict     median delta
+
+31          0.8456               -3.098 ns
+32          1.1697                0.767 ns
+33          1.5177                2.461 ns
+64          1.0796                0.495 ns
+128         1.0634                0.791 ns
+256         1.0755                1.225 ns
+1024        1.1739               10.774 ns
+4096        0.9970               -1.033 ns
+65536       1.0014               15.864 ns
+1048576     1.0045              914.734 ns
+4194304     1.0064            11627.125 ns
+```
+
+The small-size results must not be interpreted as the cost of one fixed alias
+check alone.
+
+Below and around the vectorization threshold LLVM generates different scalar,
+tail, and control-flow structures. The especially large relative differences
+at 32 and 33 samples therefore describe the complete generated execution path,
+not merely the address comparisons of `vector.memcheck`.
+
+The isolated result at 1024 samples is reproducible enough to be noteworthy,
+but it does not continue monotonically with increasing raster size and cannot
+be attributed solely to the fixed range check.
+
+#### Raster-scale interpretation
+
+At raster-oriented sizes the advantage disappears into the cost and variability
+of the conversion itself.
+
+For 65536 samples, corresponding to a 256 x 256 plane:
+
+```text
+unknown/restrict = 1.0014
+ratio MAD        = 0.0010
+```
+
+The measured difference is approximately 0.1 percent.
+
+At 1048576 samples:
+
+```text
+unknown/restrict = 1.0045
+ratio MAD        = 0.0045
+```
+
+The observed effect is of the same order as run-to-run dispersion.
+
+At 4194304 samples:
+
+```text
+median unknown/restrict = 1.0064
+ratio MAD               = 0.0165
+```
+
+Individual process medians ranged across both sides of unity:
+
+```text
+0.9824
+0.9913
+1.0282
+0.9940
+1.0342
+0.9911
+1.0228
+1.0330
+1.0064
+```
+
+The sign reversal across independent runs demonstrates that the large-buffer
+difference is dominated by effects other than the one-time alias guard, such
+as cache, memory-system, frequency, scheduling, or code-placement variability.
+
+#### E5.3e decision
+
+The current evidence supports:
+
+```text
+LLVM auto-vectorization       KEEP
+Mir execution kernel          KEEP
+runtime alias versioning      ACCEPT
+handwritten AVX2              DO NOT ADD
+production @restrict path     DO NOT ADD
+public alias assertion        DO NOT ADD
+persistent non-overlap token  DO NOT ADD
+```
+
+The already-proven non-overlap fact can technically be communicated to LLVM
+through a compiler-specific `noalias` contract, but the measured benefit is not
+material at representative raster block sizes.
+
+Introducing such a contract would strengthen the semantic precondition of a
+low-level function: an incorrect call could make compiler optimizations
+invalid rather than merely select a slower path.
+
+That additional proof burden is not justified by the observed performance.
+
+The existing checked dispatcher therefore remains the preferred design:
+
+```text
+semantic validation
+    |
+pairwise physical non-overlap proof
+    |
+safe scalar semantic kernel
+    |
+LLVM runtime alias versioning
+    |
+auto-vectorized execution
+```
+
+The small redundant runtime check is accepted as the cost of retaining the
+simpler and safer kernel contract.
+
+#### E5.3 outcome
+
+The third-operation exercise has now provided evidence for all intended E5
+questions.
+
+It produced:
+
+```text
+exact ubyte -> float semantic conversion
+scalar reference kernel
+checked operation-specific dispatcher
+explicit empty and shape semantics
+checked pairwise non-overlap
+shared @safe physical byte-range arithmetic
+automatic SIMD code generation
+evidence against premature noalias specialization
+```
+
+It also validated the E5.0 architectural rule that common machinery should be
+extracted only after duplication is demonstrated by real operations.
+
+No broader generic operation hierarchy, execution-policy framework, alias-proof
+token, or public compiler-specific specialization is justified at this stage.
+
+The next phase is E5.4: reassess the public raster-operation surface using the
+three implemented operation families as evidence.
+
 ### Expected E5.3 implementation stages
 
 ```text
