@@ -3314,6 +3314,106 @@ before introducing `WritableRasterView`.
 
 This keeps capability provenance independently testable.
 
+### E5.4c.1 retained write-access provenance
+
+E5.4c.1 implements the storage-level provenance required before a retained
+raster may later publish a writable semantic view.
+
+The retained resource metadata now contains the package-internal capability:
+
+```text
+ResourceAccess
+    readOnly
+    readWrite
+```
+
+Its default state is deliberately conservative:
+
+```text
+ResourceAccess.init == ResourceAccess.readOnly
+ResourceEntry.init.access == ResourceAccess.readOnly
+```
+
+Consequently, possession of a raw address, ownership of an allocation, or
+successful backing validation does not by itself manufacture write access.
+
+`tryAdoptMallocResource()` is the first production introduction boundary that
+positively establishes `readWrite`.
+
+That API is already an `@system` ownership boundary. Its contract now includes
+the additional caller assertion that the complete adopted byte range is valid
+writable storage. On successful adoption the resulting `OwnedByteResource`
+therefore retains `ResourceAccess.readWrite`.
+
+Package-internal raw adoption behaves differently:
+
+```text
+tryAdoptResourceEntryAssumeOwned()
+    preserves ResourceEntry.access exactly
+```
+
+It does not infer write access from:
+
+```text
+void*
+ownership
+release policy
+malloc compatibility
+descriptor topology
+backing reachability
+```
+
+This distinction is intentional. Source-specific adapters may establish their
+own access provenance before raw adoption, but the generic ownership token does
+not upgrade it.
+
+The capability then survives the existing ownership pipeline as ordinary POD
+metadata:
+
+```text
+ResourceEntry
+    ->
+OwnedByteResource
+    ->
+relinquishResource()
+    ->
+constructRetainedRaster()
+    ->
+copyMetadata!ResourceEntry
+    ->
+RasterBacking
+```
+
+No new ownership mechanism is required.
+
+The general backing validator remains independent from access capability.
+Validation proves address reachability and representation safety; it does not
+prove mutability.
+
+Temporary validation-only `ResourceEntry` values therefore remain
+conservatively read-only without affecting validation behavior.
+
+The implementation deliberately does not yet add:
+
+```text
+WritableRasterView
+RasterLease.writeView()
+mutable PlaneDescriptor
+mutable sample-pointer formation
+uniqueness
+non-aliasing
+restrict/noalias
+public ResourceAccess
+```
+
+`ResourceAccess.readWrite` means only that mutation of the retained physical
+resource has been positively permitted at its introduction boundary.
+
+It does not mean that the resource is unique, exclusively borrowed, or
+non-overlapping with another view.
+
+E5.4c.1 therefore establishes the required storage provenance while leaving
+the semantic writable-view and borrow model for the next stage.
 
 ### E5.4 progression
 
@@ -3335,6 +3435,7 @@ E5.4c
 E5.4c.1
     implement internal resource access provenance
     and verify transactional propagation
+    -> complete
 
 E5.4d
     define semantic writable raster view

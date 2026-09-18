@@ -138,6 +138,22 @@ import imagery.raster :
 D
 
 
+cat > "$tmp_dir/resource_access_surface.d" <<'D'
+module raster_owned_resource_negative_resource_access_surface;
+
+/*
+ * MUST FAIL.
+ *
+ * Raw retained-resource access provenance is package-internal storage
+ * machinery. Public callers receive semantic raster capabilities instead.
+ */
+import imagery.raster.resource :
+    ResourceAccess;
+
+ResourceAccess escapedAccess;
+D
+
+
 compile_probe()
 {
     name="$1"
@@ -191,6 +207,7 @@ compile_probe positive pass
 compile_probe copy reject
 compile_probe safe_adopt reject
 compile_probe raw_surface reject
+compile_probe resource_access_surface reject
 
 echo "FAILURES=$failures"
 

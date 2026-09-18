@@ -32,6 +32,7 @@ import imagery.raster.region :
     Region2D;
 
 import imagery.raster.resource :
+    ResourceAccess,
     ResourceEntry;
 
 import imagery.raster.sample :
@@ -502,6 +503,68 @@ RasterConstructionResult constructRetainedRaster(T)(
 
 version (unittest)
 {
+
+/*
+ * ResourceEntry is copied as stable POD metadata during retained
+ * construction. Access provenance must survive that copy byte-for-byte.
+ */
+unittest
+{
+    ubyte readOnlySample;
+    ubyte readWriteSample;
+
+    ResourceEntry[2] source =
+    [
+        ResourceEntry(
+            &readOnlySample,
+            1,
+            null,
+            null,
+            ResourceAccess.readOnly
+        ),
+
+        ResourceEntry(
+            &readWriteSample,
+            1,
+            null,
+            null,
+            ResourceAccess.readWrite
+        )
+    ];
+
+    ResourceEntry[] copied;
+
+    void* allocation;
+
+    const result =
+        copyMetadata!ResourceEntry(
+            source[],
+            copied,
+            allocation,
+            &allocateMetadata
+        );
+
+    assert(
+        result
+        == MetadataCopyError.none
+    );
+
+    assert(allocation !is null);
+    assert(copied.length == 2);
+
+    assert(
+        copied[0].access
+        == ResourceAccess.readOnly
+    );
+
+    assert(
+        copied[1].access
+        == ResourceAccess.readWrite
+    );
+
+    freeMetadata(allocation);
+}
+
 
 private
 void releaseCounted(

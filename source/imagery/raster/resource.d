@@ -24,9 +24,31 @@ alias ReleaseFn =
 
 
 /++
+    Mutation capability retained with one physical resource.
+
+    `.init` deliberately means read-only. Merely possessing a raw `void*`
+    therefore never manufactures write permission.
+
+    This capability remains package-internal. Public raster APIs consume
+    higher-level semantic read/write capabilities instead.
++/
+package(imagery.raster)
+enum ResourceAccess : ubyte
+{
+    readOnly,
+
+    readWrite
+}
+
+
+/++
     One retained physical resource.
 
     `base` and `byteLength` describe the byte range retained by RasterBacking.
+
+    `access` records whether mutation through this physical resource has been
+    positively established at its introduction boundary. It does not imply
+    uniqueness or non-aliasing.
 
     `releaseContext` is opaque callback state.
 
@@ -60,4 +82,41 @@ struct ResourceEntry
     void* releaseContext;
 
     ReleaseFn releaseFn;
+
+    /*
+     * Physical mutation provenance.
+     *
+     * This is deliberately the final field so existing four-field aggregate
+     * construction conservatively receives ResourceAccess.init/readOnly.
+     */
+    ResourceAccess access =
+        ResourceAccess.readOnly;
 }
+
+
+version (unittest)
+{
+
+static assert(
+    ResourceAccess.init
+    == ResourceAccess.readOnly
+);
+
+static assert(
+    __traits(
+        isPOD,
+        ResourceEntry
+    )
+);
+
+unittest
+{
+    ResourceEntry resource;
+
+    assert(
+        resource.access
+        == ResourceAccess.readOnly
+    );
+}
+
+} // version (unittest)

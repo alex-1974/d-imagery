@@ -13,6 +13,7 @@ import core.stdc.stdlib :
     free;
 
 import imagery.raster.resource :
+    ResourceAccess,
     ResourceEntry;
 
 
@@ -133,6 +134,26 @@ public:
 package(imagery.raster):
 
     /++
+        Returns the retained mutation capability.
+
+        Empty and moved-from tokens conservatively report read-only.
+
+        This remains package-internal. It exposes no raw resource metadata.
+    +/
+    @property
+    ResourceAccess resourceAccess() const
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        return armed_
+            ? resource_.access
+            : ResourceAccess.readOnly;
+    }
+
+
+    /++
         Returns the physical resource base while this token remains armed.
 
         Package-internal import adapters use this only for checked layout
@@ -198,8 +219,12 @@ package(imagery.raster):
     remains caller-owned.
 
     This function can validate structural requirements such as non-null base
-    and release function, but it cannot prove releaseContext lifetime or the
-    correctness of the external release callback.
+    and release function, but it cannot prove releaseContext lifetime, the
+    correctness of the external release callback, or the truth of the supplied
+    resource access capability.
+
+    `resource.access` is preserved exactly as supplied. Adoption does not infer
+    or upgrade read access to write access.
 
     Consequently the boundary remains @system.
 +/
@@ -277,6 +302,11 @@ nothrow
     The caller must not free or otherwise release `base` after a successful
     call.
 
+    Successful adoption records the physical resource as read-write.
+
+    The caller therefore also asserts that the complete adopted byte range is
+    valid writable storage for the lifetime of the ownership obligation.
+
     A null base is rejected and no ownership transfer occurs.
 
     This API deliberately uses a `ref` output target rather than `out`.
@@ -287,6 +317,7 @@ nothrow
 
     - base really denotes a free()-compatible allocation;
     - byteLength correctly describes that allocation;
+    - the complete adopted byte range is writable;
     - the caller truly owns the allocation being transferred.
 
     After successful adoption normal OwnedByteResource lifetime management does
@@ -312,7 +343,8 @@ nothrow
             base,
             byteLength,
             null,
-            &releaseMallocResource
+            &releaseMallocResource,
+            ResourceAccess.readWrite
         );
 
 
@@ -357,6 +389,11 @@ unittest
 
     assert(!empty.ownsResource);
     assert(empty.byteLength == 0);
+
+    assert(
+        empty.resourceAccess
+        == ResourceAccess.readOnly
+    );
 }
 
 
@@ -384,6 +421,11 @@ unittest
 
     assert(resource.ownsResource);
     assert(resource.byteLength == 32);
+
+    assert(
+        resource.resourceAccess
+        == ResourceAccess.readWrite
+    );
 
     /*
      * resource destructor owns the corresponding free().
@@ -414,6 +456,53 @@ unittest
 unittest
 {
     /*
+     * Raw ResourceEntry adoption preserves conservative access provenance.
+     *
+     * Four-field aggregate construction leaves access at
+     * ResourceAccess.init/readOnly. Adoption must not upgrade it merely
+     * because the resource is owned and backed by mutable allocation.
+     */
+    void* memory =
+        malloc(8);
+
+    assert(memory !is null);
+
+    ResourceEntry raw =
+        ResourceEntry(
+            memory,
+            8,
+            null,
+            &releaseMallocResource
+        );
+
+    assert(
+        raw.access
+        == ResourceAccess.readOnly
+    );
+
+    {
+        OwnedByteResource resource;
+
+        assert(
+            tryAdoptResourceEntryAssumeOwned(
+                raw,
+                resource
+            )
+        );
+
+        assert(resource.ownsResource);
+
+        assert(
+            resource.resourceAccess
+            == ResourceAccess.readOnly
+        );
+    }
+}
+
+
+unittest
+{
+    /*
      * Move transfers the exact release obligation.
      */
 
@@ -430,7 +519,8 @@ unittest
             memory,
             16,
             &releases,
-            &releaseCountedResource
+            &releaseCountedResource,
+            ResourceAccess.readWrite
         );
 
 
@@ -445,6 +535,12 @@ unittest
         );
 
         assert(first.ownsResource);
+
+        assert(
+            first.resourceAccess
+            == ResourceAccess.readWrite
+        );
+
         assert(releases == 0);
 
 
@@ -454,8 +550,18 @@ unittest
         assert(!first.ownsResource);
         assert(first.byteLength == 0);
 
+        assert(
+            first.resourceAccess
+            == ResourceAccess.readOnly
+        );
+
         assert(second.ownsResource);
         assert(second.byteLength == 16);
+
+        assert(
+            second.resourceAccess
+            == ResourceAccess.readWrite
+        );
 
         assert(releases == 0);
     }
@@ -485,7 +591,8 @@ unittest
             memory,
             24,
             &releases,
-            &releaseCountedResource
+            &releaseCountedResource,
+            ResourceAccess.readWrite
         );
 
 
@@ -510,6 +617,16 @@ unittest
 
         assert(!resource.ownsResource);
         assert(resource.byteLength == 0);
+
+        assert(
+            resource.resourceAccess
+            == ResourceAccess.readOnly
+        );
+
+        assert(
+            transferred.access
+            == ResourceAccess.readWrite
+        );
 
         assert(releases == 0);
     }
