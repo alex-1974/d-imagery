@@ -2131,6 +2131,526 @@ The type should be designed from semantic requirements rather than by promoting
 `RasterTargetPlane`.
 
 
+### E5.4b writable-raster prerequisite audit
+
+The retained raster, descriptor, ownership, and lifetime layers were audited
+before introducing a public writable raster view.
+
+The audit separates three independent questions:
+
+```text
+where is the storage?
+who keeps it alive?
+may this API write through it?
+```
+
+The first two are already represented.
+
+The third is not.
+
+
+#### PlaneDescriptor remains access-neutral
+
+`PlaneDescriptor` currently stores:
+
+```d
+const(void)* base;
+ptrdiff_t rowStrideElements;
+ptrdiff_t sampleStrideElements;
+```
+
+Its existing contract explicitly states that the descriptor is access-neutral:
+
+```text
+PlaneDescriptor describes a physical raster address and traversal geometry.
+It does not itself grant write permission.
+```
+
+This is the correct abstraction.
+
+`const(void)*` in this type must therefore not be interpreted as meaning that
+the underlying allocation is intrinsically read-only.
+
+Conversely, changing it to `void*` would conflate:
+
+```text
+physical address metadata
+```
+
+with:
+
+```text
+permission to mutate storage
+```
+
+E5.4b therefore decides:
+
+```text
+PlaneDescriptor.base             KEEP const(void)*
+PlaneDescriptor                  KEEP access-neutral
+public descriptor semantics      DO NOT add writability
+```
+
+A writable raster capability must carry write permission separately.
+
+
+#### Retained backing still owns the physical resources
+
+`RasterBacking!T` retains:
+
+```text
+ResourceEntry[]
+PlaneDescriptor[]
+resource metadata allocation
+descriptor metadata allocation
+Region2D
+```
+
+`ResourceEntry` currently contains:
+
+```d
+void* base;
+size_t byteLength;
+void* releaseContext;
+ReleaseFn releaseFn;
+```
+
+The backing therefore retains the raw physical resource address required for
+ownership and release.
+
+This means the current implementation has not physically lost the original
+resource address when a `RasterView` is created.
+
+However:
+
+```text
+ResourceEntry.base is void*
+```
+
+does not by itself establish the semantic claim:
+
+```text
+the resource may be mutated through a public writable raster API
+```
+
+The raw pointer representation exists inside an ownership/release layer and is
+reachable only through package-internal or system/trusted construction paths.
+
+A raw mutable pointer and a public write capability are not equivalent.
+
+
+#### RasterLease currently represents lifetime, not write permission
+
+`RasterLease!T` contains the retained `SafeRefCounted` backing owner.
+
+Its public view operation is:
+
+```text
+RasterLease.view()
+    ->
+RasterView!T
+```
+
+The implementation uses the existing borrow chain:
+
+```text
+RasterLease
+    |
+    v
+SafeRefCounted.borrow
+    |
+    v
+makeViewFromBacking(return ref RasterBacking)
+    |
+    v
+RasterView
+```
+
+The resulting view cannot outlive the lease.
+
+This lifetime model is already suitable as a template for a future writable
+borrow.
+
+But `RasterLease` currently has no semantic state that says:
+
+```text
+this backing is write-capable
+```
+
+and no API such as:
+
+```text
+writeView()
+mutableView()
+```
+
+should be added until that capability has a defined provenance.
+
+
+#### Lifetime is not the missing mechanism
+
+The existing read-view compile-negative tests already verify that:
+
+```text
+a RasterView cannot escape its RasterLease
+a child ROI cannot outlive its parent borrow
+a borrowed view cannot be stored globally
+```
+
+The internal writable `RasterTargetPlane` provides complementary evidence.
+
+It safely borrows a caller-owned `T[]` with `return scope`, and the
+compile-negative tests reject:
+
+```text
+returning a target backed by local storage
+returning a Mir target backed by local storage
+storing the target globally
+```
+
+Therefore E5.4 does not need a new lifetime model merely because the view is
+writable.
+
+The existing DIP1000 borrowing techniques are sufficient evidence for the
+required lifetime shape.
+
+The unresolved issue is access permission, not lifetime.
+
+
+#### Writable does not imply unique
+
+A future writable raster view must continue the rule already established by
+`RasterTargetPlane`:
+
+```text
+writable != unique
+writable != non-aliasing
+```
+
+A write-capable view means only:
+
+```text
+writes through this capability are permitted
+```
+
+It does not mean:
+
+```text
+no other view references the same storage
+no read view exists
+no second writable view exists
+source and destination do not overlap
+```
+
+`RasterLease` itself is copyable and multiple leases may retain the same
+backing.
+
+Consequently no public writable-view design should pretend to provide
+Rust-style exclusive borrowing unless a separate mechanism actually proves
+that property.
+
+Pairwise source/target overlap remains an operation-local relation.
+
+
+#### Why void* is not sufficient writable provenance
+
+The current retained resource representation needs `void*` for raw ownership
+and release callbacks.
+
+That fact is deliberately weaker than a semantic writable-storage invariant.
+
+Future resources may include, for example:
+
+```text
+read-only memory mappings
+externally owned read-only storage
+provider buffers with restricted access
+mixed-resource raster backing
+```
+
+The public raster model should not have to reinterpret such storage as writable
+merely because the release layer uses a raw pointer representation.
+
+Therefore this transformation is not justified:
+
+```text
+ResourceEntry.base
+    |
+    | cast
+    v
+public mutable T*
+```
+
+without an independently established write-capability invariant.
+
+
+#### Writable provenance must be retained explicitly
+
+Before a `RasterLease` can issue a public writable raster borrow, construction
+must retain enough information to prove that each reachable target sample is
+backed by storage for which mutation is permitted.
+
+Conceptually the missing relation is:
+
+```text
+physical retained resource
+    +
+write-capability provenance
+    +
+validated raster layout
+    ->
+writable raster borrow
+```
+
+The write capability must originate at a boundary that is entitled to make
+that claim.
+
+Examples include:
+
+```text
+owned malloc-compatible mutable allocation
+mutable caller-owned storage borrow
+read-write memory mapping
+provider API explicitly granting writable access
+```
+
+A read-only resource must not acquire writability merely because an internal
+pointer can technically be cast.
+
+
+#### Access granularity remains an open design choice
+
+E5.4b does not yet choose how writable provenance is represented.
+
+At least three models are possible.
+
+##### Backing-wide access state
+
+```text
+RasterBacking
+    access = readOnly | readWrite
+```
+
+Advantages:
+
+```text
+simple
+cheap
+easy writeView decision
+```
+
+Disadvantage:
+
+```text
+too coarse if one backing can eventually contain resources with different
+access capabilities
+```
+
+##### Per-resource access state
+
+Conceptually:
+
+```text
+ResourceEntry
+    physical byte range
+    release policy
+    access capability
+```
+
+A writable view can then be created only when every physical resource needed by
+the requested planes/region permits writes.
+
+Advantages:
+
+```text
+supports mixed-resource backing
+models physical capability where it originates
+does not change PlaneDescriptor semantics
+```
+
+Cost:
+
+```text
+writable-view construction must resolve descriptor footprints against retained
+resources
+```
+
+That work occurs at capability-construction time rather than in hot pixel loops.
+
+##### Separate writable lease capability
+
+Another possibility is a distinct retained capability such as conceptually:
+
+```text
+RasterLease
+WritableRasterLease
+```
+
+or an equivalent access-parameterized retained type.
+
+This provides stronger static distinction but risks duplicating ownership APIs
+and complicating conversion between read and write capabilities.
+
+E5.4b does not select this model yet.
+
+
+#### Backing-wide assumptions should not be introduced accidentally
+
+The current public owned-raster import happens to start from an
+`OwnedByteResource` whose existing malloc adoption path accepts mutable
+storage.
+
+That implementation fact is insufficient reason to define every
+`RasterLease!T` permanently as writable.
+
+`RasterLease` is an architectural retained-backing abstraction and future
+providers should be able to participate without manufacturing write permission.
+
+Therefore:
+
+```text
+current malloc storage is mutable
+```
+
+does not imply:
+
+```text
+RasterLease means writable retained raster
+```
+
+unless that invariant is deliberately adopted for the whole library.
+
+E5.4b does not adopt such an invariant.
+
+
+#### Mutable descriptor duplication is not justified
+
+One possible design would introduce:
+
+```text
+MutablePlaneDescriptor
+```
+
+containing the same strides plus a mutable pointer.
+
+E5.4b finds no evidence that this should become a public peer of
+`PlaneDescriptor`.
+
+The physical geometry is identical for reads and writes:
+
+```text
+descriptor-space origin
+row stride
+sample stride
+```
+
+Only the access capability differs.
+
+Duplicating the public geometry type would therefore risk allowing the read and
+write representations of the same raster to drift apart.
+
+The preferred architectural direction is:
+
+```text
+PlaneDescriptor
+    describes physical geometry
+
+separate retained access provenance
+    establishes whether writes are permitted
+
+WritableRasterView
+    combines validated geometry with a write capability
+```
+
+How that combination is represented internally remains an E5.4c question.
+
+
+#### Expected writable-view lifetime shape
+
+Subject to establishing writable provenance, the eventual borrow topology can
+mirror the existing read view:
+
+```text
+retained backing
+        |
+        +------------------------+
+        |                        |
+        v                        v
+RasterView!T             WritableRasterView!T
+read capability          write capability
+        |                        |
+        v                        v
+read execution           writable execution
+capabilities             capabilities
+                                 |
+                                 +-- RasterTargetPlane
+                                     when contiguous
+```
+
+Both view types remain:
+
+```text
+non-owning
+lifetime-bound
+region-aware
+multi-plane capable
+signed-stride capable
+```
+
+The writable side adds only permission to mutate reachable samples.
+
+It does not add ownership or uniqueness.
+
+
+#### E5.4b decisions
+
+The prerequisite audit supports:
+
+```text
+PlaneDescriptor                         KEEP
+PlaneDescriptor.base const(void)*       KEEP
+RasterBacking ownership model           KEEP
+RasterLease read view                    KEEP
+
+RasterTargetPlane                        KEEP INTERNAL
+
+existing DIP1000 borrow strategy         REUSE
+writable != unique                       PRESERVE
+overlap remains operation-local          PRESERVE
+
+RasterLease.writeView                    DO NOT ADD YET
+public WritableRasterView                DO NOT ADD YET
+public MutablePlaneDescriptor             DO NOT ADD
+cast const descriptor base to writable    DO NOT USE AS PROOF
+```
+
+The retained representation contains enough physical information to support
+future writable execution, but the semantic write-capability provenance is not
+currently represented strongly enough to expose it safely.
+
+That is the only new prerequisite identified by E5.4b.
+
+
+#### E5.4b result
+
+The original concern that writable operations might require a redesign of
+raster ownership or lifetime management is not supported by the audit.
+
+The narrower result is:
+
+```text
+ownership       sufficient
+lifetime        sufficient
+geometry        sufficient
+execution model sufficient
+
+write-access provenance
+    missing
+```
+
+Therefore the next design step must solve access provenance before defining the
+public writable view.
+
 ### E5.4 progression
 
 The next steps are:
@@ -2141,23 +2661,26 @@ E5.4a
     -> complete
 
 E5.4b
-    audit writable-raster prerequisites:
-        descriptor mutability
-        backing ownership
-        RasterLease behavior
-        construction / validation
-        lifetime constraints
+    audit writable-raster prerequisites
+    -> complete
 
 E5.4c
-    define semantic writable raster view
+    define retained write-access provenance:
+        where write permission originates
+        backing-wide versus per-resource capability
+        interaction with read-only resources
+        lease capability implications
 
 E5.4d
-    derive internal writable execution capabilities from that view
+    define semantic writable raster view
 
 E5.4e
-    redesign public operation contracts independently of current dispatchers
+    derive internal writable execution capabilities from that view
 
 E5.4f
+    redesign public operation contracts independently of current dispatchers
+
+E5.4g
     expose only operation semantics supported by stable contracts
 ```
 
