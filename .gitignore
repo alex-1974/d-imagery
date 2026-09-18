@@ -23,3 +23,6 @@ __dummy.html
 
 # DUB generated test executables
 /imagery-d-test-library
+
+# Local d-geospatial-workspace context
+.workspace/
