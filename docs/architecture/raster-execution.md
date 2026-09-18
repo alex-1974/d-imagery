@@ -1250,9 +1250,9 @@ unrepresentable
 
 Overlap and unrepresentable address ranges fail before the first target write.
 
-The successful E4.3a path still executes the E3c scalar contiguous reference
-copy. It intentionally introduces no `restrict`, LLVM `noalias`, `memcpy`,
-`memmove`, fast-math, or size threshold.
+At the E4.3a stage the successful path still executed the E3c scalar
+contiguous reference copy. That stage intentionally introduced no `restrict`,
+LLVM `noalias`, `memcpy`, `memmove`, fast-math, or size threshold.
 
 This separation is intentional:
 
@@ -1272,3 +1272,76 @@ The checked copy dispatcher remains package-internal. DIP1000 compile probes
 verify that already-valid source and target borrows can enter the operation
 from `@safe` code while only a value result is returned, and that the dispatch
 surface is not visible outside `imagery.raster`.
+
+### E4.3b proven non-overlap copy specialization
+
+E4.3b replaces only the final successful E4.3a scalar-copy step. The checked
+plane, shape, flat-contiguous capability, address-representability, and
+non-overlap requirements remain unchanged.
+
+Code-generation experiments with LDC 1.41.0 / LLVM 19.1.7 showed:
+
+```text
+raw pointer loop, unknown aliasing
+    runtime alias/distance check
+    vectorized copy loop
+
+raw pointer loop with LDC @restrict
+    LLVM noalias parameters
+    lowered to llvm.memcpy
+
+dynamic-array parameters with @restrict
+    invalid LLVM noalias placement
+    verifier abort
+
+Mir Slice parameters with @restrict
+    invalid LLVM noalias placement
+    verifier abort
+```
+
+Consequently production code does not annotate D dynamic arrays or Mir slices
+with LDC `@restrict`, and does not depend on a compiler-specific no-alias
+attribute.
+
+Once E4.3a has proved that the complete source and target physical intervals
+are non-overlapping, E4.3b calls `memcpy` directly inside the same narrow
+trusted boundary that performs the physical-address relation check.
+
+This avoids expressing an already-proved fact indirectly through compiler
+attributes:
+
+```text
+RasterView + RasterTargetPlane
+        |
+        v
+shape / flat-contiguous checks
+        |
+        v
+physical interval proof
+        |
+        +-- overlap / unrepresentable -> failure, no write
+        |
+        `-- proven non-overlap -> memcpy
+```
+
+A temporary LDC release benchmark on the development Skylake host compared the
+existing E3c/Mir copy, direct `memcpy`, E4.3a checked scalar copy, and the
+candidate checked-`memcpy` path over 1 byte through 16 MiB.
+
+The checked-`memcpy` candidate was faster than checked scalar copy at every
+measured size. For the six sizes from 16 KiB through 16 MiB:
+
+```text
+median checked-scalar / checked-memcpy = 1.206
+checked-memcpy wins                   = 6 / 6 sizes
+```
+
+The measured speedup is evidence for this implementation on the tested
+toolchain and host, not a portable performance guarantee.
+
+No size threshold is introduced. The specialization is semantically valid for
+every non-empty flat-contiguous range satisfying the checked non-overlap
+contract, while the implementation delegates size-specific copy strategy to
+the platform `memcpy`.
+
+The public raster API remains unchanged.

@@ -12,17 +12,11 @@
 +/
 module imagery.raster.internal.copy_dispatch;
 
+import core.stdc.string :
+    memcpy;
+
 import imagery.raster.internal.execution_layout :
     PlaneExecutionTraits;
-
-import imagery.raster.internal.mir_adapter :
-    asMirContiguousFlat;
-
-import imagery.raster.internal.mir_target_adapter :
-    asMirTargetContiguousFlat;
-
-import imagery.raster.internal.scalar_pointwise :
-    scalarCopyContiguous1D;
 
 import imagery.raster.internal.target :
     RasterTargetPlane;
@@ -111,23 +105,28 @@ nothrow
 
 
 /*
- * Relation between two non-empty flat byte-address intervals.
+ * Outcome of checking and, when permitted, copying two non-empty flat
+ * byte-address intervals.
+ *
+ * `copied` means that the non-overlap proof succeeded and the bytewise copy
+ * has already completed.
  */
 private
-enum PhysicalRangeRelation : ubyte
+enum CheckedPhysicalCopyOutcome : ubyte
 {
-    overlapping,
+    overlapDetected,
 
-    nonOverlapping,
+    copied,
 
     unrepresentable
 }
 
 
 /++
-    Classifies two equally sized, non-empty contiguous T ranges.
+    Checks two equally sized, non-empty contiguous T ranges and copies them
+    when their complete physical byte intervals are provably non-overlapping.
 
-    This is the only E4.3a trusted boundary.
+    This remains the only trusted boundary in the checked-copy operation.
 
     Pointer values are converted to integer addresses so half-open physical
     byte intervals can be compared:
@@ -138,10 +137,12 @@ enum PhysicalRangeRelation : ubyte
     The project already uses the same flat-address representation inside its
     retained-resource validation boundary.
 
-    No pointer is dereferenced here.
+    `memcpy` is reached only after proving that the intervals do not overlap.
+    The flat-contiguous execution capability and target construction guarantee
+    that byteLength bytes are reachable from both supplied bases.
 +/
 private
-PhysicalRangeRelation classifyPhysicalRangeRelation(T)(
+CheckedPhysicalCopyOutcome copyIfPhysicalRangesNonOverlapping(T)(
     scope const(T)* sourceBase,
     scope T* targetBase,
     size_t elementCount
@@ -159,7 +160,7 @@ nothrow
         > size_t.max / T.sizeof
     )
     {
-        return PhysicalRangeRelation.unrepresentable;
+        return CheckedPhysicalCopyOutcome.unrepresentable;
     }
 
     const byteLength =
@@ -176,7 +177,7 @@ nothrow
         || byteLength > size_t.max - targetStart
     )
     {
-        return PhysicalRangeRelation.unrepresentable;
+        return CheckedPhysicalCopyOutcome.unrepresentable;
     }
 
     const sourceEnd =
@@ -190,10 +191,16 @@ nothrow
         || targetEnd <= sourceStart
     )
     {
-        return PhysicalRangeRelation.nonOverlapping;
+        memcpy(
+            targetBase,
+            sourceBase,
+            byteLength
+        );
+
+        return CheckedPhysicalCopyOutcome.copied;
     }
 
-    return PhysicalRangeRelation.overlapping;
+    return CheckedPhysicalCopyOutcome.overlapDetected;
 }
 
 
@@ -214,9 +221,9 @@ nothrow
 
     Failure occurs before the first target write.
 
-    E4.3a deliberately executes the existing scalar E3c copy after the
-    non-overlap proof. A later specialization may replace only that final
-    execution step without weakening this checked contract.
+    E4.3b executes a direct bytewise copy only after the same E4.3a
+    non-overlap proof succeeds. No caller-provided no-alias assertion is
+    accepted and no compiler-specific restrict attribute is required.
 +/
 package(imagery.raster)
 NonOverlappingCopyResult tryCopyNonOverlappingContiguous1D(T)(
@@ -285,41 +292,22 @@ nothrow
     assert(targetBase !is null);
 
     final switch (
-        classifyPhysicalRangeRelation(
+        copyIfPhysicalRangesNonOverlapping(
             sourceBase,
             targetBase,
             traits.flatElementCount
         )
     )
     {
-        case PhysicalRangeRelation.overlapping:
+        case CheckedPhysicalCopyOutcome.overlapDetected:
             return copyFailure(
                 NonOverlappingCopyError.overlapDetected
             );
 
-        case PhysicalRangeRelation.nonOverlapping:
-        {
-            const copied =
-                scalarCopyContiguous1D(
-                    asMirContiguousFlat(
-                        source,
-                        planeIndex
-                    ),
-                    asMirTargetContiguousFlat(
-                        target
-                    )
-                );
-
-            /*
-             * Shape equality and flat element-count equality were already
-             * established above.
-             */
-            assert(copied);
-
+        case CheckedPhysicalCopyOutcome.copied:
             return copySuccess();
-        }
 
-        case PhysicalRangeRelation.unrepresentable:
+        case CheckedPhysicalCopyOutcome.unrepresentable:
             return copyFailure(
                 NonOverlappingCopyError.addressRangeUnrepresentable
             );
@@ -746,14 +734,16 @@ unittest
 
 
 /*
- * Half-open adjacent intervals are non-overlapping.
+ * Half-open adjacent intervals are non-overlapping and may therefore be
+ * copied byte-for-byte.
  */
 unittest
 {
-    ubyte[8] storage;
+    ubyte[8] storage =
+        [1, 2, 3, 4, 0, 0, 0, 0];
 
     const relation =
-        classifyPhysicalRangeRelation(
+        copyIfPhysicalRangesNonOverlapping(
             storage.ptr,
             storage.ptr + 4,
             4
@@ -761,7 +751,12 @@ unittest
 
     assert(
         relation
-        == PhysicalRangeRelation.nonOverlapping
+        == CheckedPhysicalCopyOutcome.copied
+    );
+
+    assert(
+        storage[4 .. 8]
+        == storage[0 .. 4]
     );
 }
 
@@ -780,7 +775,7 @@ unittest
         cast(ubyte*) 16;
 
     const relation =
-        classifyPhysicalRangeRelation(
+        copyIfPhysicalRangesNonOverlapping(
             source,
             target,
             4
@@ -788,7 +783,7 @@ unittest
 
     assert(
         relation
-        == PhysicalRangeRelation.unrepresentable
+        == CheckedPhysicalCopyOutcome.unrepresentable
     );
 }
 
