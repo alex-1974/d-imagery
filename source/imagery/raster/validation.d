@@ -20,6 +20,7 @@ import imagery.raster.region :
     Region2D;
 
 import imagery.raster.resource :
+    ResourceAccess,
     ResourceEntry;
 
 import imagery.raster.sample :
@@ -500,6 +501,298 @@ nothrow
 
 
 /++
+    Failure category for package-internal writable-backing certification.
+
+    Certification is performed only after ordinary backing validation has
+    established geometry, address reachability and representation safety.
+
+    Therefore the only expected semantic failure is that a represented plane
+    lacks complete coverage by a retained read-write resource.
++/
+package(imagery.raster)
+enum WritableBackingCertificationError : ubyte
+{
+    none,
+
+    planeNotWritable
+}
+
+
+/++
+    Result of package-internal writable-backing certification.
+
+    `.init` is deliberately not successful.
++/
+package(imagery.raster)
+struct WritableBackingCertificationResult
+{
+    WritableBackingCertificationError error =
+        WritableBackingCertificationError.planeNotWritable;
+
+    size_t planeIndex =
+        size_t.max;
+
+
+    @property
+    bool ok() const
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        return error
+            == WritableBackingCertificationError.none;
+    }
+}
+
+
+/++
+    Tests whether one already-validated plane region is completely covered by
+    at least one retained read-write resource.
+
+    Preconditions are the invariants already established by
+    validateRasterBackingLayout():
+
+    - region extent arithmetic is representable;
+    - non-empty descriptor coordinates fit ptrdiff_t;
+    - descriptor base/alignment are valid;
+    - retained resource ranges are representable.
+
+    This function deliberately reuses the existing checked axis/offset helpers
+    and the existing physical containment helper.
+
+    It introduces no second address/stride arithmetic implementation and no new
+    trusted pointer boundary.
+
+    Empty regions reach no samples and therefore require no writable resource.
++/
+private
+bool validatedPlaneRegionHasWritableCoverage(T)(
+    const(ResourceEntry)[] resources,
+    scope const ref PlaneDescriptor descriptor,
+    Region2D region
+)
+@safe
+nothrow
+@nogc
+{
+    static assert(
+        isRasterSampleType!T,
+        "Writable raster sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
+
+    if (region.empty())
+    {
+        return true;
+    }
+
+
+    /*
+     * These properties were already established by backing validation.
+     * Keep assertions here because this helper must never become a substitute
+     * for initial backing validation.
+     */
+    assert(region.hasRepresentableExtent());
+
+    assert(
+        region.x + region.width - 1
+        <= cast(size_t) ptrdiff_t.max
+    );
+
+    assert(
+        region.y + region.height - 1
+        <= cast(size_t) ptrdiff_t.max
+    );
+
+    assert(descriptor.base !is null);
+
+
+    ptrdiff_t xMinimum;
+    ptrdiff_t xMaximum;
+
+    if (
+        !checkedAxisOffsets(
+            region.x,
+            region.width,
+            descriptor.sampleStrideElements,
+            xMinimum,
+            xMaximum
+        )
+    )
+    {
+        /*
+         * A retained backing that reached this point was already validated.
+         * Returning false remains conservative even in release builds.
+         */
+        return false;
+    }
+
+
+    ptrdiff_t yMinimum;
+    ptrdiff_t yMaximum;
+
+    if (
+        !checkedAxisOffsets(
+            region.y,
+            region.height,
+            descriptor.rowStrideElements,
+            yMinimum,
+            yMaximum
+        )
+    )
+    {
+        return false;
+    }
+
+
+    ptrdiff_t minimumOffset;
+    ptrdiff_t maximumOffset;
+
+    if (
+        !checkedAdd(
+            xMinimum,
+            yMinimum,
+            minimumOffset
+        )
+        || !checkedAdd(
+            xMaximum,
+            yMaximum,
+            maximumOffset
+        )
+    )
+    {
+        return false;
+    }
+
+
+    foreach (resource; resources)
+    {
+        if (
+            resource.access
+            != ResourceAccess.readWrite
+        )
+        {
+            continue;
+        }
+
+
+        /*
+         * The backing validator already proved every retained range valid.
+         *
+         * Keep the check nevertheless so this certification primitive fails
+         * conservatively if it is ever misused internally.
+         */
+        if (!validResourceRange(resource))
+        {
+            continue;
+        }
+
+
+        if (
+            resourceContainsPlaneRegion!T(
+                resource,
+                descriptor,
+                minimumOffset,
+                maximumOffset
+            )
+        )
+        {
+            return true;
+        }
+    }
+
+
+    return false;
+}
+
+
+/++
+    Certifies that every plane represented by one already-validated retained
+    raster may be written.
+
+    This is a package-internal semantic access check.
+
+    It does not establish:
+
+    - uniqueness;
+    - non-aliasing;
+    - source/target non-overlap;
+    - contiguous execution layout;
+    - thread exclusivity.
+
+    A matching empty region succeeds before any resource coverage work because
+    it reaches no samples.
+
+    The caller must supply metadata that has already passed
+    validateRasterBackingLayout().
++/
+package(imagery.raster)
+WritableBackingCertificationResult certifyWritableRasterBacking(T)(
+    const(ResourceEntry)[] resources,
+    const(PlaneDescriptor)[] descriptors,
+    Region2D region
+)
+@safe
+nothrow
+@nogc
+{
+    static assert(
+        isRasterSampleType!T,
+        "Writable raster sample type must be an unqualified POD value type "
+        ~ "without indirections."
+    );
+
+
+    /*
+     * Ordinary backing construction guarantees both properties.
+     *
+     * Certification is intentionally not another general backing validator.
+     */
+    assert(descriptors.length != 0);
+    assert(region.hasRepresentableExtent());
+
+
+    if (region.empty())
+    {
+        return WritableBackingCertificationResult(
+            WritableBackingCertificationError.none,
+            size_t.max
+        );
+    }
+
+
+    foreach (
+        planeIndex,
+        descriptor;
+        descriptors
+    )
+    {
+        if (
+            !validatedPlaneRegionHasWritableCoverage!T(
+                resources,
+                descriptor,
+                region
+            )
+        )
+        {
+            return WritableBackingCertificationResult(
+                WritableBackingCertificationError.planeNotWritable,
+                planeIndex
+            );
+        }
+    }
+
+
+    return WritableBackingCertificationResult(
+        WritableBackingCertificationError.none,
+        size_t.max
+    );
+}
+
+
+/++
     Validates a retained raster representation before publication.
 
     The validator proves the safety properties required by RasterView's
@@ -754,6 +1047,359 @@ nothrow
 
 version (unittest)
 {
+
+unittest
+{
+    /*
+     * Complete read-write physical coverage certifies the plane.
+     */
+    ubyte[12] samples;
+
+    const resources =
+    [
+        ResourceEntry(
+            samples.ptr,
+            samples.length,
+            null,
+            null,
+            ResourceAccess.readWrite
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    const region =
+        Region2D(
+            0,
+            0,
+            4,
+            3
+        );
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+
+    const result =
+        certifyWritableRasterBacking!ubyte(
+            resources,
+            descriptors,
+            region
+        );
+
+    assert(result.ok);
+    assert(
+        result.error
+        == WritableBackingCertificationError.none
+    );
+    assert(result.planeIndex == size_t.max);
+}
+
+
+unittest
+{
+    /*
+     * Four-field ResourceEntry construction remains conservatively read-only.
+     */
+    ubyte[12] samples;
+
+    const resources =
+    [
+        ResourceEntry(
+            samples.ptr,
+            samples.length,
+            null,
+            null
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    const region =
+        Region2D(
+            0,
+            0,
+            4,
+            3
+        );
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+
+    const result =
+        certifyWritableRasterBacking!ubyte(
+            resources,
+            descriptors,
+            region
+        );
+
+    assert(!result.ok);
+
+    assert(
+        result.error
+        == WritableBackingCertificationError.planeNotWritable
+    );
+
+    assert(result.planeIndex == 0);
+}
+
+
+unittest
+{
+    /*
+     * Whole-view certification reports the first non-writable logical plane.
+     */
+    ubyte[4] writableSamples;
+    ubyte[4] readOnlySamples;
+
+    const resources =
+    [
+        ResourceEntry(
+            writableSamples.ptr,
+            writableSamples.length,
+            null,
+            null,
+            ResourceAccess.readWrite
+        ),
+
+        ResourceEntry(
+            readOnlySamples.ptr,
+            readOnlySamples.length,
+            null,
+            null,
+            ResourceAccess.readOnly
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            writableSamples.ptr,
+            4,
+            1
+        ),
+
+        PlaneDescriptor(
+            readOnlySamples.ptr,
+            4,
+            1
+        )
+    ];
+
+    const region =
+        Region2D(
+            0,
+            0,
+            4,
+            1
+        );
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+
+    const result =
+        certifyWritableRasterBacking!ubyte(
+            resources,
+            descriptors,
+            region
+        );
+
+    assert(!result.ok);
+
+    assert(
+        result.error
+        == WritableBackingCertificationError.planeNotWritable
+    );
+
+    assert(result.planeIndex == 1);
+}
+
+
+unittest
+{
+    /*
+     * A read-write resource must contain the complete reachable plane region.
+     *
+     * A full read-only resource plus an undersized read-write resource is not
+     * sufficient writable coverage.
+     */
+    ubyte[4] samples;
+
+    const resources =
+    [
+        ResourceEntry(
+            samples.ptr,
+            samples.length,
+            null,
+            null,
+            ResourceAccess.readOnly
+        ),
+
+        ResourceEntry(
+            samples.ptr,
+            samples.length - 1,
+            null,
+            null,
+            ResourceAccess.readWrite
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    const region =
+        Region2D(
+            0,
+            0,
+            4,
+            1
+        );
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+
+    const result =
+        certifyWritableRasterBacking!ubyte(
+            resources,
+            descriptors,
+            region
+        );
+
+    assert(!result.ok);
+    assert(result.planeIndex == 0);
+}
+
+
+unittest
+{
+    /*
+     * Signed row strides participate in exactly the same physical containment
+     * proof used by ordinary backing validation.
+     */
+    ubyte[12] samples;
+
+    const resources =
+    [
+        ResourceEntry(
+            samples.ptr,
+            samples.length,
+            null,
+            null,
+            ResourceAccess.readWrite
+        )
+    ];
+
+    const descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr + 8,
+            -4,
+            1
+        )
+    ];
+
+    const region =
+        Region2D(
+            0,
+            0,
+            4,
+            3
+        );
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+
+    assert(
+        certifyWritableRasterBacking!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+}
+
+
+unittest
+{
+    /*
+     * Empty regions reach no sample and therefore need no writable resource.
+     */
+    const(ResourceEntry)[] resources;
+
+    const descriptors =
+    [
+        PlaneDescriptor.init
+    ];
+
+    const region =
+        Region2D(
+            10,
+            20,
+            0,
+            0
+        );
+
+    assert(
+        validateRasterBackingLayout!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+
+    assert(
+        certifyWritableRasterBacking!ubyte(
+            resources,
+            descriptors,
+            region
+        ).ok
+    );
+}
+
 
 unittest
 {
