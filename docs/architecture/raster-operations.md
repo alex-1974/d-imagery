@@ -1277,6 +1277,128 @@ The operation remains `@safe` except for the narrow physical-address
 classification boundary, which converts pointers to integer addresses. That
 boundary performs no dereference and no mutation.
 
+### E5.3c shared physical-range arithmetic
+
+With checked copy and checked ubyte-to-float conversion both implemented
+independently, E5.3c identifies one genuinely repeated mechanism:
+
+```text
+integer start address
+    +
+byte length
+    ->
+overflow-safe half-open interval end
+
+two intervals
+    ->
+overlapping / nonOverlapping / unrepresentable
+```
+
+The shared abstraction is intentionally placed *below* pointer handling:
+
+```text
+classifyByteAddressRanges(
+    firstStart,
+    firstByteLength,
+    secondStart,
+    secondByteLength
+)
+```
+
+It accepts only `size_t` integer addresses and byte lengths.
+
+This is an important safety boundary decision.
+
+The shared classifier is:
+
+```text
+@safe
+pure
+nothrow
+@nogc
+```
+
+and performs:
+
+```text
+no pointer conversion
+no pointer arithmetic
+no dereference
+no mutation
+no memcpy
+```
+
+Pointer-to-integer conversion remains inside each operation's existing narrow
+trusted boundary.
+
+For checked copy that trusted boundary still owns the complete critical
+sequence:
+
+```text
+source/target pointers
+        |
+        v
+pointer -> integer addresses
+        |
+        v
+shared safe range classification
+        |
+        +-- overlap / unrepresentable -> failure
+        |
+        `-- non-overlap
+                |
+                v
+              memcpy
+```
+
+Thus E5.3c does not weaken the E4.3b guarantee that the proof and `memcpy`
+remain coupled inside one trusted function.
+
+For conversion:
+
+```text
+source/target pointers
+        |
+        v
+pointer -> integer addresses
+        |
+        v
+shared safe range classification
+        |
+        v
+relation returned to @safe dispatcher
+        |
+        `-- non-overlap -> typed scalar conversion kernel
+```
+
+The two operations also retain their own element-to-byte calculations because
+their semantics differ:
+
+```text
+checked copy
+    one T.sizeof
+    same source/target byte length
+    successful relation immediately permits memcpy
+
+ubyte -> float conversion
+    ubyte.sizeof and float.sizeof
+    different source/target byte lengths
+    successful relation permits a typed conversion kernel
+```
+
+E5.3c therefore extracts only the arithmetic that is demonstrably identical.
+
+It does not introduce:
+
+```text
+generic operation results
+generic alias policy
+persistent proof tokens
+shared pointer ownership
+shared trusted pointer classifier
+generic execution dispatcher
+```
+
 ### Expected E5.3 implementation stages
 
 ```text

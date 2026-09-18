@@ -25,6 +25,10 @@ import imagery.raster.internal.mir_adapter :
 import imagery.raster.internal.mir_target_adapter :
     asMirTargetContiguousFlat;
 
+import imagery.raster.internal.physical_range :
+    PhysicalByteRangeRelation,
+    classifyByteAddressRanges;
+
 import imagery.raster.internal.scalar_conversion :
     scalarConvertUbyteToFloatContiguous1D;
 
@@ -114,21 +118,6 @@ nothrow
 }
 
 
-/*
- * Physical relation between the concrete source-byte interval and
- * target-float interval of one non-empty conversion operation.
- */
-private
-enum ConversionPhysicalRangeRelation : ubyte
-{
-    overlapping,
-
-    nonOverlapping,
-
-    unrepresentable
-}
-
-
 /++
     Classifies the physical ranges used by one non-empty ubyte-to-float
     conversion.
@@ -145,7 +134,7 @@ enum ConversionPhysicalRangeRelation : ubyte
     No source or target memory is dereferenced or modified here.
 +/
 private
-ConversionPhysicalRangeRelation classifyConversionPhysicalRanges(
+PhysicalByteRangeRelation classifyConversionPhysicalRanges(
     scope const(ubyte)* sourceBase,
     scope float* targetBase,
     size_t elementCount
@@ -164,7 +153,7 @@ nothrow
     )
     {
         return
-            ConversionPhysicalRangeRelation.unrepresentable;
+            PhysicalByteRangeRelation.unrepresentable;
     }
 
     if (
@@ -173,7 +162,7 @@ nothrow
     )
     {
         return
-            ConversionPhysicalRangeRelation.unrepresentable;
+            PhysicalByteRangeRelation.unrepresentable;
     }
 
     const sourceByteLength =
@@ -188,34 +177,12 @@ nothrow
     const targetStart =
         cast(size_t) targetBase;
 
-    if (
-        sourceByteLength
-        > size_t.max - sourceStart
-        || targetByteLength
-        > size_t.max - targetStart
-    )
-    {
-        return
-            ConversionPhysicalRangeRelation.unrepresentable;
-    }
-
-    const sourceEnd =
-        sourceStart + sourceByteLength;
-
-    const targetEnd =
-        targetStart + targetByteLength;
-
-    if (
-        sourceEnd <= targetStart
-        || targetEnd <= sourceStart
-    )
-    {
-        return
-            ConversionPhysicalRangeRelation.nonOverlapping;
-    }
-
-    return
-        ConversionPhysicalRangeRelation.overlapping;
+    return classifyByteAddressRanges(
+        sourceStart,
+        sourceByteLength,
+        targetStart,
+        targetByteLength
+    );
 }
 
 
@@ -310,17 +277,17 @@ nothrow
         )
     )
     {
-        case ConversionPhysicalRangeRelation.overlapping:
+        case PhysicalByteRangeRelation.overlapping:
             return conversionFailure(
                 UbyteToFloatConversionError.overlapDetected
             );
 
-        case ConversionPhysicalRangeRelation.unrepresentable:
+        case PhysicalByteRangeRelation.unrepresentable:
             return conversionFailure(
                 UbyteToFloatConversionError.addressRangeUnrepresentable
             );
 
-        case ConversionPhysicalRangeRelation.nonOverlapping:
+        case PhysicalByteRangeRelation.nonOverlapping:
         {
             const converted =
                 scalarConvertUbyteToFloatContiguous1D(
@@ -749,7 +716,7 @@ unittest
 
     assert(
         relation
-        == ConversionPhysicalRangeRelation.unrepresentable
+        == PhysicalByteRangeRelation.unrepresentable
     );
 }
 
@@ -769,7 +736,7 @@ unittest
 
     assert(
         relation
-        == ConversionPhysicalRangeRelation.unrepresentable
+        == PhysicalByteRangeRelation.unrepresentable
     );
 }
 
@@ -791,7 +758,7 @@ unittest
 
     assert(
         relation
-        == ConversionPhysicalRangeRelation.nonOverlapping
+        == PhysicalByteRangeRelation.nonOverlapping
     );
 }
 

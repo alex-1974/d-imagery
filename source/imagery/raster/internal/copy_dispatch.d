@@ -19,6 +19,10 @@ import core.stdc.string :
 import imagery.raster.internal.execution_layout :
     PlaneExecutionTraits;
 
+import imagery.raster.internal.physical_range :
+    PhysicalByteRangeRelation,
+    classifyByteAddressRanges;
+
 import imagery.raster.internal.target :
     RasterTargetPlane;
 
@@ -173,35 +177,32 @@ nothrow
     const targetStart =
         cast(size_t) targetBase;
 
-    if (
-        byteLength > size_t.max - sourceStart
-        || byteLength > size_t.max - targetStart
-    )
-    {
-        return CheckedPhysicalCopyOutcome.unrepresentable;
-    }
-
-    const sourceEnd =
-        sourceStart + byteLength;
-
-    const targetEnd =
-        targetStart + byteLength;
-
-    if (
-        sourceEnd <= targetStart
-        || targetEnd <= sourceStart
-    )
-    {
-        memcpy(
-            targetBase,
-            sourceBase,
+    final switch (
+        classifyByteAddressRanges(
+            sourceStart,
+            byteLength,
+            targetStart,
             byteLength
-        );
+        )
+    )
+    {
+        case PhysicalByteRangeRelation.unrepresentable:
+            return CheckedPhysicalCopyOutcome.unrepresentable;
 
-        return CheckedPhysicalCopyOutcome.copied;
+        case PhysicalByteRangeRelation.overlapping:
+            return CheckedPhysicalCopyOutcome.overlapDetected;
+
+        case PhysicalByteRangeRelation.nonOverlapping:
+        {
+            memcpy(
+                targetBase,
+                sourceBase,
+                byteLength
+            );
+
+            return CheckedPhysicalCopyOutcome.copied;
+        }
     }
-
-    return CheckedPhysicalCopyOutcome.overlapDetected;
 }
 
 
