@@ -634,6 +634,316 @@ E5.1 is intentionally an audit before refactoring.
 The existence of similar-looking code is not by itself evidence that an
 abstraction is useful.
 
+## E5.1 reduction-versus-copy dispatcher audit
+
+E5.1 audits the two existing production dispatchers before introducing any
+shared operation-layer implementation.
+
+The audited operations are:
+
+```text
+dispatchFloatToDoubleSum
+tryCopyNonOverlappingContiguous1D
+```
+
+The audit deliberately compares semantic responsibilities rather than merely
+similar source syntax.
+
+### Exact common mechanism
+
+Both dispatchers begin by asking the source `RasterView` for
+`PlaneExecutionTraits`:
+
+```text
+RasterView
+    |
+    v
+tryPlaneExecutionTraits
+    |
+    +-- invalid plane
+    |
+    `-- operation-specific continuation
+```
+
+This is the only meaningful identical dispatcher step.
+
+No additional helper is justified for it.
+
+`tryPlaneExecutionTraits` already is the shared capability-query abstraction.
+Wrapping it again would either:
+
+```text
+return only bool + traits
+    -> duplicate the existing API
+
+or
+
+construct an operation result
+    -> become operation-specific
+```
+
+E5.1 therefore keeps the query directly in each dispatcher.
+
+### Similar syntax that is not shared semantics
+
+Both modules contain small success/failure construction helpers.
+
+Reduction has:
+
+```text
+successfulSum(value)
+failedSum(error)
+```
+
+Copy has:
+
+```text
+copySuccess()
+copyFailure(error)
+```
+
+These are syntactically similar but semantically different.
+
+The reduction result carries:
+
+```text
+operation error
+double value
+```
+
+The copy result carries:
+
+```text
+operation error
+```
+
+Their failure domains also differ.
+
+Reduction reports:
+
+```text
+invalidPlaneIndex
+unsupportedExecution
+invalidSemantics
+```
+
+Copy reports:
+
+```text
+invalidPlaneIndex
+shapeMismatch
+unsupportedExecution
+overlapDetected
+addressRangeUnrepresentable
+```
+
+A generic result or common success/failure helper would therefore remove useful
+type information without eliminating meaningful complexity.
+
+E5.1 does not introduce one.
+
+### Empty handling is a convention, not a reusable implementation
+
+Both operations resolve valid empty inputs before forming execution pointers or
+demanding non-empty-only capabilities.
+
+Their observable semantics remain operation-specific:
+
+```text
+empty reduction
+    -> additive identity 0.0
+
+empty matching copy
+    -> successful no-op
+```
+
+The reusable concept is therefore the ordering rule:
+
+> Resolve an operation's semantic empty case before requiring execution
+> capabilities or physical pointers that are meaningful only for non-empty
+> storage.
+
+There is no common empty-operation helper.
+
+### Capability use differs
+
+Reduction consumes the full execution-layout classification.
+
+Strict reduction selects among:
+
+```text
+Universal
+Canonical
+Contiguous 2D
+flat Contiguous 1D
+```
+
+FixedLane4 requires:
+
+```text
+flat Contiguous 1D
+```
+
+Copy currently requires only:
+
+```text
+flat Contiguous 1D source
+contiguous writable target
+```
+
+and does not dispatch over the full 2D layout enum.
+
+The common abstraction therefore remains `PlaneExecutionTraits` itself. There
+is no evidence for an additional generic capability-dispatch layer.
+
+### Dispatch topology differs
+
+Reduction dispatch topology is:
+
+```text
+validate plane
+    |
+    v
+numeric semantic
+    |
+    +-- strict
+    |     |
+    |     `-- execution layout
+    |
+    `-- fixedLane4
+          |
+          `-- flat capability requirement
+```
+
+Copy dispatch topology is:
+
+```text
+validate plane
+    |
+    v
+validate source/target shape
+    |
+    v
+resolve empty no-op
+    |
+    v
+require flat source capability
+    |
+    v
+obtain source/target execution bases
+    |
+    v
+prove pairwise physical relation
+    |
+    +-- overlap / unrepresentable -> failure
+    |
+    `-- proven non-overlap -> memcpy
+```
+
+A generic dispatcher would have to parameterize nearly every meaningful stage.
+At that point it would be a framework around the operation-specific dispatcher
+rather than a simplification of it.
+
+E5.1 rejects that abstraction.
+
+### Safety requirements differ
+
+Reduction dispatch itself remains `@safe` and operates through already defined
+execution adapters and kernels.
+
+Checked copy uniquely requires a narrow trusted boundary for:
+
+```text
+pointer -> integer-address representation
+range-end overflow checks
+pairwise physical non-overlap proof
+memcpy
+```
+
+Trusted execution is therefore not a common operation-layer phase that should
+be represented in a generic planner.
+
+It belongs only to operations whose concrete implementation requires it.
+
+### Dependency structure differs
+
+Reduction depends on:
+
+```text
+execution layout
+Mir read adapters
+scalar reduction kernels
+fixed-lane reduction kernel
+RasterView
+```
+
+Copy depends on:
+
+```text
+execution traits
+RasterTargetPlane
+RasterView
+C memcpy
+```
+
+The small common dependency set is already represented by the lower raster
+types and execution-trait API.
+
+Creating another shared dispatcher module would add a dependency layer without
+removing an existing one.
+
+### E5.1 result
+
+The audit finds a common conceptual pipeline but no new common production type
+or helper worth introducing.
+
+The result is:
+
+```text
+shared architectural vocabulary
+    keep
+
+RasterView / RasterTargetPlane
+    keep
+
+PlaneExecutionTraits
+    keep as the shared capability representation
+
+tryPlaneExecutionTraits
+    keep as the shared capability-query boundary
+
+operation-specific result types
+    keep
+
+operation-specific error enums
+    keep
+
+operation-specific dispatchers
+    keep
+
+generic operation result
+    reject
+
+generic execution policy
+    reject
+
+generic planner / dispatcher
+    reject
+
+new shared dispatcher helper
+    not justified
+```
+
+Consequently E5.2 requires no production refactoring based on the current two
+operations.
+
+This is a deliberate outcome rather than a missing implementation: the
+existing lower-level abstractions already capture the genuinely shared
+mechanics.
+
+The next useful test of the operation model is a third operation with different
+requirements.
+
 ## E5.0 decision
 
 The raster engine uses a common conceptual operation pipeline but retains

@@ -5,10 +5,11 @@
     and one concrete target. It is deliberately not represented as a property
     of RasterTargetPlane and is not accepted as an unchecked caller assertion.
 
-    E4.3a establishes only the checked semantic path. The successful
-    non-overlapping case still executes the scalar E3c reference kernel.
+    E4.3a established the checked source/target relation contract.
 
-    Compiler-specific no-alias specialization belongs to a later step.
+    E4.3b specializes the successful proven-non-overlap case with `memcpy`
+    inside the same narrow trusted boundary. No compiler-specific no-alias
+    attribute is part of the production contract.
 +/
 module imagery.raster.internal.copy_dispatch;
 
@@ -333,7 +334,7 @@ import imagery.raster.view :
 
 /*
  * Distinct contiguous source and target ranges are proved non-overlapping and
- * copied through the E3c reference kernel.
+ * copied through the checked memcpy path.
  */
 unittest
 {
