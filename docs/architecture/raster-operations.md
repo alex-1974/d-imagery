@@ -3415,6 +3415,708 @@ non-overlapping with another view.
 E5.4c.1 therefore establishes the required storage provenance while leaving
 the semantic writable-view and borrow model for the next stage.
 
+### E5.4d semantic writable raster view
+
+E5.4c and E5.4c.1 established retained per-resource write-access provenance.
+
+E5.4d defines the semantic borrowing abstraction that may consume that
+provenance.
+
+The working type name is:
+
+```text
+WritableRasterView!T
+```
+
+The name is selected because the capability means exactly:
+
+```text
+samples represented by this view may be written
+```
+
+It deliberately does not imply:
+
+```text
+unique
+exclusive
+owned
+non-aliasing
+contiguous
+single-plane
+```
+
+The type remains package-internal during its first implementation. Public
+exposure is still deferred until the operation contracts have been reviewed.
+
+
+#### Relationship to RasterView
+
+`WritableRasterView!T` is the writable semantic peer of `RasterView!T`.
+
+Both represent:
+
+```text
+non-owning raster borrow
+logical plane order
+Region2D resident geometry
+descriptor-space coordinates
+signed row stride
+signed sample stride
+multi-plane topology
+empty regions
+lifetime bounded by retained backing
+```
+
+They differ only in access capability:
+
+```text
+RasterView
+    permits reads
+
+WritableRasterView
+    permits reads and writes
+```
+
+The writable type must not be derived merely by casting the pointer carried by
+`PlaneDescriptor`.
+
+Its existence certifies that the represented samples were proven writable.
+
+
+#### Representation
+
+The initial writable view should contain the same semantic geometry as
+`RasterView`:
+
+```text
+const(PlaneDescriptor)[] planes
+Region2D region
+```
+
+It does not need to retain `ResourceEntry[]` itself.
+
+The proof chain is:
+
+```text
+RasterBacking
+    resources + descriptors + region
+              |
+              | certification
+              v
+WritableRasterView
+    descriptors + region
+```
+
+After successful certification, the writable-view type itself carries the
+semantic capability.
+
+The physical resources remain alive through the enclosing `RasterLease`
+borrow.
+
+This avoids coupling normal pixel traversal to retained resource metadata.
+
+
+#### PlaneDescriptor remains unchanged
+
+E5.4d preserves the existing decision:
+
+```text
+PlaneDescriptor.base == const(void)*
+```
+
+The descriptor remains access-neutral geometry.
+
+A writable view therefore does not require:
+
+```text
+MutablePlaneDescriptor
+void* PlaneDescriptor.base
+duplicated mutable descriptor tables
+```
+
+Write permission comes from retained resource provenance plus certification,
+not from the descriptor pointer qualifier.
+
+
+#### Initial certification invariant
+
+For every non-empty plane represented by a `WritableRasterView!T`:
+
+```text
+there exists at least one retained ResourceEntry
+whose access is readWrite
+and whose byte range contains every reachable T sample
+of that plane for the represented Region2D
+```
+
+The proof must include the same geometry already required for read
+reachability:
+
+```text
+descriptor-space x/y
+signed row stride
+signed sample stride
+minimum reachable offset
+maximum reachable offset
+complete T sample width
+address representability
+```
+
+Checking only the descriptor base address is insufficient.
+
+
+#### Reuse existing reachability arithmetic
+
+Writable certification must not implement a second independent physical
+footprint algorithm.
+
+The existing backing validator already establishes the relevant containment
+relation for ordinary reachability.
+
+The preferred implementation direction is therefore:
+
+```text
+existing shared containment arithmetic
+        |
+        +-- ordinary retained-backing validation
+        |
+        `-- writable certification with
+            ResourceAccess.readWrite filtering
+```
+
+If required, the smallest existing private helper should be promoted to an
+appropriate package-internal validation primitive.
+
+This promotion must not expose raw resource metadata publicly.
+
+
+#### One-resource containment remains the invariant
+
+As with ordinary backing validation, one non-empty represented plane region
+must be completely contained by one suitable retained resource.
+
+Writable certification must not combine partial byte coverage from several
+resources.
+
+Thus:
+
+```text
+resource A covers first half
+resource B covers second half
+```
+
+does not certify one plane region.
+
+A storage model that genuinely spans resources requires a different raster
+representation.
+
+
+#### Mixed-access backing
+
+A retained backing may contain:
+
+```text
+readOnly resources
+readWrite resources
+```
+
+The initial whole-view certification succeeds only when every non-empty plane
+represented by the resulting `WritableRasterView` is covered by a readWrite
+resource.
+
+Therefore:
+
+```text
+one non-writable represented plane
+    ->
+whole WritableRasterView certification fails
+```
+
+The backing itself remains valid and can still issue a normal `RasterView`.
+
+
+#### Initial scope: complete plane set
+
+The first writable view represents the same logical plane set as the retained
+raster.
+
+E5.4d does not yet introduce:
+
+```text
+writable plane-selection API
+arbitrary writable band subsets
+mixed read/write planes inside one WritableRasterView
+```
+
+The initial invariant is deliberately stronger:
+
+```text
+every plane represented by WritableRasterView is writable
+```
+
+A later selected-plane capability can be added without weakening this
+invariant.
+
+
+#### Empty semantics
+
+An empty `Region2D` reaches no samples.
+
+Therefore an empty writable view requires no writable physical sample range.
+
+Conceptually:
+
+```text
+empty region
+    ->
+write certification succeeds without ResourceAccess.readWrite coverage
+```
+
+No mutable pixel pointer may be formed for an empty view.
+
+Plane topology and lifetime semantics remain preserved.
+
+
+#### Lifetime
+
+`WritableRasterView` is non-owning.
+
+When produced from `RasterLease`, it must be lifetime-bound to that lease in
+the same manner as the existing read-only view:
+
+```text
+RasterLease
+    |
+    +-- view()
+    |      ->
+    |   RasterView
+    |
+    `-- tryWritableView(...)
+           ->
+        WritableRasterView
+```
+
+A writable view must not:
+
+```text
+outlive its RasterLease
+escape into global storage from a local lease
+return a child ROI whose parent borrow has expired
+```
+
+The existing DIP1000 strategy remains the model.
+
+
+#### RasterLease remains a lifetime capability
+
+`RasterLease` itself does not become synonymous with writable storage.
+
+The same type may retain:
+
+```text
+fully read-only backing
+fully read-write backing
+mixed-access backing
+```
+
+Therefore the eventual lease API must express certification failure.
+
+The preferred semantic shape is a fallible operation conceptually equivalent
+to:
+
+```text
+lease.tryWritableView(...)
+```
+
+rather than:
+
+```text
+lease.writeView()
+```
+
+The exact production signature is deferred until the DIP1000 implementation is
+tested.
+
+
+#### No WritableRasterLease
+
+E5.4d preserves the previous decision not to introduce a separate retained
+ownership type merely for mutation.
+
+Write capability belongs to the borrowed raster view, while `RasterLease`
+continues to represent retained lifetime.
+
+This keeps:
+
+```text
+ownership/lifetime
+```
+
+separate from:
+
+```text
+read/write access capability
+```
+
+
+#### Writable does not imply uniqueness
+
+`WritableRasterView` may be copied within its permitted lifetime.
+
+Multiple leases may retain the same backing.
+
+Read-only and writable views may therefore alias physically.
+
+This is deliberate.
+
+The capability guarantees:
+
+```text
+writes are permitted
+```
+
+It does not guarantee:
+
+```text
+only this view may write
+only this view may read
+another plane cannot overlap
+another raster cannot overlap
+another lease cannot reference the storage
+```
+
+No `restrict`, LLVM `noalias`, unique-owner, or exclusive-borrow property may
+be derived from the writable-view type.
+
+
+#### Threading is a separate contract
+
+Writable permission alone does not make concurrent mutation race-free.
+
+E5.4d introduces no automatic synchronization and no thread-exclusive borrow.
+
+Concurrent access policy belongs to a later execution/scheduling layer.
+
+A future parallel kernel must establish whatever additional synchronization or
+non-aliasing properties its execution semantics require.
+
+
+#### ROI inheritance
+
+A geometrically valid child ROI of an already-certified writable view remains
+writable.
+
+The reason is monotonic:
+
+```text
+child reachable sample set
+    is a subset of
+parent reachable sample set
+```
+
+Therefore writable resource certification need not be repeated for every ROI.
+
+The writable ROI operation should mirror the geometry semantics of
+`RasterView.tryRoi`.
+
+However, it must not recover mutable access from a const-qualified writable
+view.
+
+The initial writable ROI API should therefore require a mutable receiver.
+
+
+#### Read access through a writable view
+
+A writable view may safely provide ordinary value reads.
+
+Its read semantics should match `RasterView.trySample`.
+
+This does not require creating a second physical capability.
+
+A future convenience conversion:
+
+```text
+WritableRasterView
+    ->
+RasterView
+```
+
+is semantically valid because write capability strictly subsumes read
+capability.
+
+Such a conversion must remain lifetime-bound to the writable view or the same
+retained backing.
+
+E5.4d does not require this conversion for the first implementation.
+
+
+#### Sample writes
+
+The semantic control-plane write operation is conceptually:
+
+```text
+trySetSample(
+    band,
+    x,
+    y,
+    value
+)
+```
+
+with coordinates relative to the writable view, matching
+`RasterView.trySample`.
+
+It must:
+
+```text
+reject invalid band
+reject invalid x/y
+perform no write on failure
+support signed physical strides
+support multi-plane descriptors
+write exactly one T sample on success
+```
+
+It is a correctness/control-plane accessor, not the intended hot-loop kernel
+interface.
+
+
+#### Mutable pointer formation
+
+The stored descriptor remains access-neutral and therefore exposes
+`const(void)*`.
+
+After writable certification, execution code eventually needs `T*`.
+
+That conversion must occur only through a narrow trusted boundary associated
+with the certified writable-view type.
+
+Conceptually:
+
+```text
+certified WritableRasterView
+        |
+        | narrow @trusted pointer formation
+        v
+T*
+```
+
+The cast does not establish writability.
+
+It consumes writability that has already been established by certification.
+
+
+#### Execution bridge
+
+The writable semantic type should eventually expose package-internal
+capability queries analogous to the read view:
+
+```text
+plane execution traits
+signed row/sample strides
+mutable region-origin execution pointer
+```
+
+Those remain internal execution machinery.
+
+The public semantic type must not expose:
+
+```text
+Mir slices
+Canonical / Contiguous / Universal
+raw ResourceEntry
+ResourceAccess
+physical-range proof machinery
+```
+
+E5.4e remains responsible for deriving specialized writable execution
+capabilities such as `RasterTargetPlane`.
+
+
+#### RasterTargetPlane remains downstream
+
+`RasterTargetPlane!T` remains an execution specialization.
+
+The intended layering is:
+
+```text
+WritableRasterView
+    |
+    | derive capability when layout permits
+    v
+RasterTargetPlane
+    |
+    v
+Mir writable target / scalar kernel / specialized kernel
+```
+
+The direction must never be reversed.
+
+A semantic writable raster is not defined by being contiguous.
+
+
+#### Certification failure is semantic access failure
+
+Failure to create a writable view because a represented plane lacks
+write-capable retained storage is an access-capability result.
+
+It is not:
+
+```text
+unsupportedExecution
+```
+
+and must not depend on Mir or layout specialization.
+
+The first package-internal certification result may report at least:
+
+```text
+success
+plane not writable
+failing plane index
+```
+
+The exact eventual public error vocabulary is deferred to E5.4f.
+
+
+#### No operation-specific alias proof is stored
+
+Writable certification does not establish source/target relations.
+
+In particular it must not store or cache:
+
+```text
+non-overlap with a RasterView
+non-overlap with another WritableRasterView
+same backing identity
+memcpy eligibility
+```
+
+Those remain invocation-local operation facts.
+
+
+#### Construction boundary
+
+No general raw constructor should allow package users to manufacture a
+writable view merely from:
+
+```text
+PlaneDescriptor[]
+Region2D
+```
+
+The preferred construction boundary combines:
+
+```text
+retained ResourceEntry[]
+stable PlaneDescriptor[]
+Region2D
+```
+
+performs writable certification, and only then constructs the semantic type.
+
+Child ROI construction is different: once the parent writable view has been
+certified, a contained child may inherit the capability without consulting
+resources again.
+
+
+#### Initial visibility
+
+The first implementation remains:
+
+```text
+package(imagery.raster)
+```
+
+even though the semantic type is designed as a future public abstraction.
+
+This permits:
+
+```text
+DIP1000 testing
+certification testing
+mixed-access testing
+signed-stride testing
+operation integration
+```
+
+before the name and exact public constructors become compatibility promises.
+
+
+#### E5.4d decisions
+
+Current evidence supports:
+
+```text
+semantic type name                    WritableRasterView
+
+initial visibility                    PACKAGE INTERNAL
+
+representation                        PlaneDescriptor[] + Region2D
+store ResourceEntry[] in view         NO
+MutablePlaneDescriptor                NO
+
+whole-view first                      YES
+all represented planes writable       REQUIRED
+selected writable band subsets        DEFER
+
+empty view without writable bytes     ALLOW
+
+lifetime model                        MIRROR RasterView
+writable ROI                          INHERITS CERTIFICATION
+const parent -> writable child         NO
+
+control-plane sample read             ALLOW
+control-plane sample write            ALLOW
+
+writable means unique                 NO
+writable means noalias                NO
+writable means thread exclusive       NO
+
+general raw writable constructor      DO NOT ADD
+
+mutable pointer formation             NARROW @trusted
+execution layouts                     KEEP INTERNAL
+RasterTargetPlane                     KEEP DOWNSTREAM
+```
+
+This is the semantic contract for the first writable raster view.
+
+
+#### E5.4d implementation boundary
+
+The implementation should be split so that certification and view behavior can
+be tested independently.
+
+The next production stage should establish:
+
+```text
+E5.4d.1
+
+1. shared writable containment certification
+2. package-internal WritableRasterView!T
+3. whole-backing certification
+4. lease-bound writable borrow
+5. writable ROI lifetime
+6. trySample / trySetSample correctness
+7. empty-region behavior
+8. signed-stride behavior
+9. mixed readOnly/readWrite rejection
+10. DMD + LDC compile-negative lifetime tests
+```
+
+It should still not:
+
+```text
+export WritableRasterView publicly
+adapt operations to it
+derive RasterTargetPlane from it
+define public copy/conversion APIs
+```
+
+Those remain subsequent E5.4 stages.
+
+
 ### E5.4 progression
 
 The next steps are:
@@ -3439,6 +4141,10 @@ E5.4c.1
 
 E5.4d
     define semantic writable raster view
+    -> design complete
+
+E5.4d.1
+    implement and verify package-internal WritableRasterView
 
 E5.4e
     derive internal writable execution capabilities from that view
