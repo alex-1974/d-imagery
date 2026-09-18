@@ -1,6 +1,22 @@
 # R0.2 Memory Model Research
 
-Status: **ACTIVE**
+Status: **COMPLETED R0.2 RESEARCH SNAPSHOT**
+
+> **Implementation note — 2026-09-19**
+>
+> This document preserves the R0.2 research evidence and conclusions in their
+> historical context. Later R0.3 and E5.4 work refined parts of the provisional
+> API shape.
+>
+> In particular, the production core now represents semantic write capability
+> with package-internal `WritableRasterView!T` plus retained
+> `ResourceAccess.readWrite` provenance and writable-backing certification.
+> The earlier R0.2 hypothesis of expressing read/write distinction solely
+> through `RasterView!T` versus `RasterView!(const T)` is therefore not the
+> current implementation model.
+>
+> Current implementation sequencing is authoritative in
+> `docs/architecture/raster-operations.md` and `ROADMAP.md`.
 
 This document records the memory-view experiments for `imagery-d`.
 

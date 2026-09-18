@@ -95,3 +95,17 @@ Performance-sensitive work will be tested with both DMD and LDC. LDC/LLVM is
 expected to become the primary performance compiler.
 
 See `ROADMAP.md`, `DESIGN.md` and `BENCHMARK.md`.
+
+## Workspace context
+
+When developed inside `d-geospatial-workspace`, current shared architecture
+and research context is available locally under:
+
+```text
+.workspace/
+```
+
+That directory is local workspace context and is not part of the `imagery-d`
+repository or DUB package.
+
+Repository-root documentation remains specific to `imagery-d`.

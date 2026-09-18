@@ -123,34 +123,85 @@ rather than being globally hard-coded.
 
 ## 4. Memory and view model
 
-The initial representation remains deliberately undecided.
+The initial R0.2/R0.3 research has been completed far enough to select the
+resident raster/view architecture now used by the core implementation.
 
-R0 will compare at least:
+The current model separates:
 
-- explicit pointer + shape + stride views;
-- `mir.ndslice`;
-- packed pixel structures;
-- planar channels;
-- interleaved channels;
-- contiguous and arbitrary-stride regions.
+```text
+retained physical resources
+        |
+        v
+RasterBacking
+        |
+        | retained ownership
+        v
+RasterLease
+        |
+        +---- lease-bound read borrow ----> RasterView
+        |
+        `---- future lease-bound writable borrow
+                                      |
+                                      v
+                              WritableRasterView
+```
 
-The public API must not expose implementation details unnecessarily.
+`RasterView` remains a cheap non-owning semantic read view.
 
-If `mir.ndslice` is selected as an internal substrate, public image semantics
-should still be represented by imagery-d types rather than leaking
-`Slice!(...)` throughout consuming applications.
+`WritableRasterView` is its package-internal writable semantic peer. It
+certifies permission to write represented samples but does not imply:
 
-A likely conceptual layering is:
+```text
+uniqueness
+non-aliasing
+contiguity
+single-plane storage
+thread exclusivity
+```
 
-    storage
-       ↓
-    RasterView
-       ↓
-    ImageView
-       ↓
-    GeoImage / imagery metadata
+Physical raster geometry is described using validated plane descriptors with
+signed row and sample strides. Multi-plane storage does not require one common
+base allocation.
 
-This is a research hypothesis, not yet a stable API.
+Mir `ndslice` has been selected as an internal execution substrate where useful,
+not as part of the public semantic API.
+
+The current execution architecture therefore separates:
+
+```text
+imagery-d raster semantics
+        |
+        v
+validated RasterView / WritableRasterView
+        |
+        v
+package-internal execution classification/adapters
+        |
+        +-- generic strided path
+        |
+        `-- specialized proven fast paths
+```
+
+The public API must not expose Mir implementation types.
+
+Ownership/lifetime and read/write capability remain separate concepts.
+
+The current unfinished memory-model step is the lifetime-safe writable borrow
+from `RasterLease`. The writable semantic view itself and writable-backing
+certification already exist.
+
+Detailed evidence and implementation sequencing are maintained in:
+
+```text
+docs/research/memory-model.md
+docs/research/raster-core-types.md
+docs/architecture/raster-construction.md
+docs/architecture/raster-execution.md
+docs/architecture/raster-operations.md
+ROADMAP.md
+```
+
+The wider image/source/cache/scheduling API remains experimental.
 
 ## 5. Region-first processing
 
