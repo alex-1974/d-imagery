@@ -1143,15 +1143,20 @@ foreach (i; 0 .. sampleCount)
     target[i] = cast(float) source[i];
 ```
 
-The kernel itself should operate only after shape, capability, and alias
-preconditions are satisfied.
+The kernel itself operates after the dispatcher has established logical raster
+shape, execution capability, and alias preconditions.
+
+The flat execution kernel still defensively verifies that source and target
+element counts are equal before the first write. This is a local execution
+contract check; it does not replace the dispatcher's logical width/height
+validation.
 
 It does not decide:
 
 ```text
 plane validity
-shape validity
-empty behavior
+logical raster shape validity
+empty-operation semantics
 alias policy
 execution capability
 ```
@@ -1175,6 +1180,41 @@ A later SIMD implementation is therefore permitted only if it preserves the
 same per-sample value mapping exactly.
 
 No separate fast numeric semantic is required for this operation.
+
+### E5.3a scalar reference kernel
+
+The initial production reference kernel is:
+
+```text
+scalarConvertUbyteToFloatContiguous1D
+```
+
+Its execution contract is deliberately narrow:
+
+```text
+source
+    flat Contiguous 1D const ubyte
+
+target
+    flat Contiguous 1D float
+
+equal flat element count
+    required
+
+mismatched flat element count
+    false before first target write
+
+matching empty slices
+    true
+
+non-empty success
+    target[i] = cast(float) source[i]
+```
+
+The kernel does not inspect `RasterView`, `RasterTargetPlane`, plane indices,
+logical width/height, or physical alias relationships.
+
+It introduces no trusted code and no numeric-policy type.
 
 ### Expected E5.3 implementation stages
 
