@@ -16,6 +16,7 @@ files=(
     README.md
     ROADMAP.md
     DESIGN_PRINCIPLES.md
+    RESEARCH.md
 )
 
 for file in "${files[@]}"; do
@@ -24,6 +25,11 @@ for file in "${files[@]}"; do
         exit 1
     fi
 done
+
+if ! git -C "$repo_root" check-ignore -q .workspace/README.md; then
+    echo "ERROR: .workspace/ is not ignored by this repository" >&2
+    exit 1
+fi
 
 mkdir -p "$workspace_dir"
 
