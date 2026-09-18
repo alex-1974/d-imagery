@@ -1399,6 +1399,126 @@ shared trusted pointer classifier
 generic execution dispatcher
 ```
 
+### E5.3d ubyte-to-float code-generation audit
+
+The E5.3a scalar conversion kernel was compiled directly with:
+
+```text
+LDC 1.41.0
+LLVM 19.1.7
+x86-64
+Skylake
+-O3
+-release
+-enable-inlining
+-mcpu=native
+```
+
+No handwritten SIMD or fast-math semantics were introduced.
+
+LLVM reports:
+
+```text
+vectorization width: 8
+interleaved count: 4
+```
+
+The native vector loop lowers the exact integer-to-float conversion to four
+independent eight-sample groups:
+
+```text
+vpmovzxbd
+vpmovzxbd
+vpmovzxbd
+vpmovzxbd
+
+vcvtdq2ps
+vcvtdq2ps
+vcvtdq2ps
+vcvtdq2ps
+
+vmovups
+vmovups
+vmovups
+vmovups
+```
+
+Thus one main-loop iteration converts 32 samples while preserving the exact
+`ubyte -> float` operation semantics.
+
+A handwritten AVX2 conversion kernel is therefore not justified by current
+evidence.
+
+#### Runtime alias versioning
+
+The audit also found an important missed cross-layer optimization opportunity.
+
+Before entering the vector loop LLVM emits a runtime memory-conflict check
+equivalent to:
+
+```text
+targetStart < sourceEnd
+    &&
+sourceStart < targetEnd
+```
+
+If that condition indicates possible overlap, execution falls back to the
+scalar path.
+
+Only after this check does LLVM attach the alias metadata used by the vector
+body.
+
+This check is semantically redundant for calls made through the E5.3b
+dispatcher because that dispatcher has already established pairwise physical
+non-overlap before invoking the conversion kernel.
+
+The current architecture therefore loses an established relational fact at
+the dispatcher-to-kernel boundary:
+
+```text
+dispatcher
+    proves non-overlap
+        |
+        v
+scalar conversion kernel
+    has no representation of that proof
+        |
+        v
+LLVM independently emits runtime alias versioning
+```
+
+This does not affect correctness. It can affect generated code and runtime
+cost.
+
+#### E5.3d decision
+
+Current evidence supports:
+
+```text
+LLVM auto-vectorization       KEEP
+handwritten AVX2              DO NOT ADD
+fast-math                     NOT RELEVANT
+manual vector-width policy    DO NOT ADD
+runtime alias guard           INVESTIGATE
+```
+
+The next experiment should isolate whether communicating the already-proven
+non-overlap fact to LDC/LLVM removes the redundant runtime memory check and
+whether doing so produces a measurable benefit.
+
+Such an experiment must not weaken the existing safety architecture:
+
+```text
+no caller-provided unchecked alias assertion
+no persistent public proof token
+no uniqueness claim on RasterTargetPlane
+no compiler-specific attribute in the public API
+```
+
+Any compiler-specific alias specialization remains an internal execution
+detail and requires code-generation plus performance evidence before production
+adoption.
+
 ### Expected E5.3 implementation stages
 
 ```text
