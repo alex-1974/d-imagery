@@ -1216,6 +1216,67 @@ logical width/height, or physical alias relationships.
 
 It introduces no trusted code and no numeric-policy type.
 
+### E5.3b checked conversion dispatch
+
+The package-internal conversion dispatcher is:
+
+```text
+tryConvertUbyteToFloatContiguous1D
+```
+
+Its validation order is:
+
+```text
+valid source plane
+        |
+        v
+matching logical width/height
+        |
+        v
+matching empty shape
+        +-- yes -> successful no-op
+        |
+        v
+flat Contiguous 1D source capability
+        |
+        v
+source/target execution bases
+        |
+        v
+representable physical byte ranges
+        |
+        v
+pairwise non-overlap
+        |
+        +-- overlap / unrepresentable -> failure before write
+        |
+        `-- non-overlap
+                |
+                v
+        scalar ubyte-to-float kernel
+```
+
+The source and target intervals deliberately use independent byte lengths:
+
+```text
+sourceByteLength = elementCount * ubyte.sizeof
+targetByteLength = elementCount * float.sizeof
+```
+
+E5.3b intentionally keeps this physical-range calculation local to the
+conversion operation even though checked copy contains structurally similar
+logic.
+
+This creates two concrete production use cases before E5.3c considers a shared
+physical-byte-range abstraction.
+
+Unlike checked copy, successful range classification performs no write.
+Conversion executes only afterwards through the E5.3a scalar kernel.
+
+The operation remains `@safe` except for the narrow physical-address
+classification boundary, which converts pointers to integer addresses. That
+boundary performs no dereference and no mutation.
+
 ### Expected E5.3 implementation stages
 
 ```text
