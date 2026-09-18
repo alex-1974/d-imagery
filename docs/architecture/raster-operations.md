@@ -4117,6 +4117,53 @@ define public copy/conversion APIs
 Those remain subsequent E5.4 stages.
 
 
+#### E5.4d.1 implementation checkpoint — 2026-09-18
+
+The first two implementation slices are now complete.
+
+`E5.4d.1a` added package-internal writable-backing certification. Ordinary
+backing validation remains the physical safety proof; writable certification
+adds the requirement that every represented non-empty plane be completely
+covered by at least one retained `ResourceAccess.readWrite` resource.
+
+`E5.4d.1b` added package-internal `WritableRasterView!T` with:
+
+```text
+planeCount / region / width / height / empty
+tryRoi
+trySample
+trySetSample
+```
+
+The raw assume-certified constructor is module-private. The package-visible
+initial construction path requires retained resources, descriptors and region,
+performs ordinary backing validation, performs writable certification, and only
+then constructs the semantic writable capability.
+
+The writable view stores descriptors plus region, not retained resource
+metadata. It does not imply uniqueness, noalias, contiguity or thread
+exclusivity.
+
+DIP1000 compile probes with DMD and LDC verify:
+
+```text
+local writable use                     accepted
+writable ROI read/write                accepted
+return of scope-borrowed writable view rejected
+global escape                          rejected
+const parent -> writable child         rejected
+raw assume-certified constructor use   rejected outside its module
+external writable-view surface         rejected
+```
+
+`E5.4d.1c` remains deliberately unimplemented. The next question is how the
+existing `SafeRefCounted.borrow` path should expose a non-const,
+lease-lifetime-bound writable borrow while preventing write capability from
+being recovered through a const `RasterLease`.
+
+No writable execution bridge or public raster operation API is introduced by
+E5.4d.1a/b.
+
 ### E5.4 progression
 
 The next steps are:
@@ -4145,6 +4192,25 @@ E5.4d
 
 E5.4d.1
     implement and verify package-internal WritableRasterView
+    -> partially complete
+
+    E5.4d.1a
+        writable backing certification
+        -> complete
+
+    E5.4d.1b
+        semantic WritableRasterView
+        writable ROI
+        trySample / trySetSample
+        signed-stride and empty-region behavior
+        DMD + LDC lifetime probes
+        -> complete
+
+    E5.4d.1c
+        lease-bound writable borrow
+        RasterLease -> WritableRasterView
+        const-lease exclusion
+        -> next
 
 E5.4e
     derive internal writable execution capabilities from that view

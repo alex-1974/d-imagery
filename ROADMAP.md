@@ -1,5 +1,55 @@
 # d-imagery Roadmap
 
+## Current implementation checkpoint — 2026-09-18
+
+The repository has progressed beyond the initial architecture-only stage while
+the long-term milestone structure below remains valid.
+
+Current core status:
+
+- retained resource ownership and raster backing are implemented;
+- `RasterView` provides the read-only semantic resident view;
+- signed-stride and multi-plane backing validation are implemented;
+- execution layouts and Mir adapters remain internal;
+- scalar reduction/copy kernels and measured specializations exist internally;
+- `ubyte -> float` conversion has a checked internal dispatch path;
+- per-resource `readOnly` / `readWrite` provenance is retained;
+- writable backing certification is implemented;
+- package-internal `WritableRasterView` with writable ROI, sample read and
+  sample write semantics is implemented and DIP1000-tested with DMD and LDC.
+
+The current raster-operations sequence is:
+
+```text
+E5.4a    public-surface audit                         complete
+E5.4b    writable prerequisites audit                 complete
+E5.4c    retained write-access provenance design      complete
+E5.4c.1  retained ResourceAccess implementation       complete
+E5.4d    semantic writable-view contract              complete
+E5.4d.1a writable backing certification               complete
+E5.4d.1b semantic WritableRasterView implementation   complete
+E5.4d.1c RasterLease -> writable borrow                next
+E5.4e    writable execution capabilities              not started
+E5.4f    public operation contract redesign            not started
+E5.4g    stable public operation exposure              not started
+```
+
+`WritableRasterView` is intentionally still package-internal. It establishes
+write permission but does not imply uniqueness, non-aliasing, contiguity or
+thread exclusivity.
+
+M0 is therefore substantially implemented for the resident raster/view core,
+but is not considered complete until the writable lifetime integration and
+remaining API stabilization work have been finished.
+
+M2 has partial internal implementation used to validate the engine
+architecture; copy, reduction and conversion machinery are not yet exposed as
+stable public raster operations.
+
+No repository rename is performed by this checkpoint. The repository and DUB
+package still use the current `d-imagery` name until the separately coordinated
+repository/worktree reorganization.
+
 ## R0 — Constraints, Research and Architecture
 
 The first phase determines the architecture before the core API is stabilized.

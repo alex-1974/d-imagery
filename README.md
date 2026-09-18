@@ -10,13 +10,28 @@ geospatial and large-image processing.
 
 ## Status
 
-Early research and architecture phase.
+Active core-engine implementation following the initial research and
+architecture phase.
 
-The core raster representation, ownership model, region model and execution
-architecture are deliberately not stable yet.
+The retained raster foundation now includes:
 
-Implementation follows measurement and architectural research rather than
-preceding it.
+- owned-resource import and retained backing lifetime;
+- descriptor-space regions and read-only `RasterView` semantics;
+- signed row and sample strides;
+- per-plane execution-layout classification;
+- internal Mir adapters and scalar reference kernels;
+- evidence-driven reduction and copy specialization;
+- checked `ubyte -> float` conversion;
+- per-resource read/write provenance;
+- writable-backing certification;
+- a package-internal semantic `WritableRasterView`.
+
+The writable semantic layer is not public yet. The next unfinished step is the
+lease-bound writable borrow from `RasterLease`; writable execution adaptation
+and stable public operation contracts come afterwards.
+
+The public API remains experimental. Performance-sensitive implementation is
+developed from measured evidence and validated with both DMD and LDC.
 
 ## Primary goals
 
