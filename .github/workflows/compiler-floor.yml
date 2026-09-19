@@ -1,9 +1,12 @@
-name: Compiler Floor Audit
+name: Compiler Floor
 
 on:
   push:
     branches:
+      - main
+      # Temporary validation trigger; remove after the research-branch run passes.
       - research/compiler-floor-audit
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -17,20 +20,45 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS x86-64 / DMD 2.111.0
+          - name: Linux x86-64 / DMD 2.101.2
+            os: ubuntu-24.04
+            compiler: dmd-2.101.2
+            dub: 1.40.0
+
+          - name: Linux x86-64 / LDC 1.31.0
+            os: ubuntu-24.04
+            compiler: ldc-1.31.0
+            dub: 1.40.0
+
+          - name: Linux ARM64 / LDC 1.31.0
+            os: ubuntu-24.04-arm
+            compiler: ldc-1.31.0
+            dub: any
+
+          - name: Windows x86-64 / DMD 2.101.2
+            os: windows-2025
+            compiler: dmd-2.101.2
+            dub: 1.40.0
+
+          - name: Windows x86-64 / LDC 1.31.0
+            os: windows-2025
+            compiler: ldc-1.31.0
+            dub: 1.40.0
+
+          - name: macOS x86-64 / DMD 2.112.1
             os: macos-15-intel
-            compiler: dmd-2.111.0
-            dub: latest
+            compiler: dmd-2.112.1
+            dub: 1.40.0
 
           - name: macOS x86-64 / LDC 1.41.0
             os: macos-15-intel
             compiler: ldc-1.41.0
-            dub: latest
+            dub: 1.40.0
 
           - name: macOS ARM64 / LDC 1.41.0
             os: macos-15
             compiler: ldc-1.41.0
-            dub: latest
+            dub: 1.40.0
 
     runs-on: ${{ matrix.os }}
 
@@ -38,7 +66,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install pinned D compiler
+      - name: Install minimum supported D compiler
         uses: dlang-community/setup-dlang@v2
         with:
           compiler: ${{ matrix.compiler }}
@@ -48,8 +76,11 @@ jobs:
       - name: Environment
         shell: bash
         run: |
-          echo "Requested compiler: ${{ matrix.compiler }}"
-          echo "DC:                 $DC"
+          echo "Runner OS:            $RUNNER_OS"
+          echo "Runner arch:          $RUNNER_ARCH"
+          echo "Requested compiler:   ${{ matrix.compiler }}"
+          echo "Requested DUB policy: ${{ matrix.dub }}"
+          echo "DC:                   $DC"
           echo
 
           "$DC" --version
