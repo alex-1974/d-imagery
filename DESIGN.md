@@ -140,10 +140,15 @@ RasterLease
         |
         +---- lease-bound read borrow ----> RasterView
         |
-        `---- future lease-bound writable borrow
+        `---- lease-bound writable borrow
                                       |
                                       v
                               WritableRasterView
+                                      |
+                                      | when one current plane is
+                                      | flat contiguous
+                                      v
+                              RasterTargetPlane
 ```
 
 `RasterView` remains a cheap non-owning semantic read view.
@@ -186,9 +191,12 @@ The public API must not expose Mir implementation types.
 
 Ownership/lifetime and read/write capability remain separate concepts.
 
-The current unfinished memory-model step is the lifetime-safe writable borrow
-from `RasterLease`. The writable semantic view itself and writable-backing
-certification already exist.
+The lease-bound writable borrow, writable execution primitives and first
+flat-contiguous `WritableRasterView -> RasterTargetPlane` execution bridge are
+now implemented.
+
+`WritableRasterView` remains package-internal while the existing operation
+consumers are integrated and their eventual public contracts are reviewed.
 
 Detailed evidence and implementation sequencing are maintained in:
 

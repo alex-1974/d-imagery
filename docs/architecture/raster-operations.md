@@ -4437,13 +4437,13 @@ E5.4e.1
 E5.4e.2
     derive RasterTargetPlane from WritableRasterView for valid contiguous
     planes, including empty-view semantics and DIP1000 lifetime tests
-    -> next
+    -> complete
 
 E5.4e.3
     verify existing copy/conversion consumers can use the derived target
     without exposing WritableRasterView, RasterTargetPlane, Mir, or execution
     layouts publicly
-    -> not started
+    -> next
 ```
 
 No broader writable execution abstraction is justified by current evidence.
@@ -4583,7 +4583,225 @@ internal target derivation
 RasterTargetPlane
 ```
 
-E5.4e.2 is now the next implementation step.
+#### E5.4e.2 contiguous writable target checkpoint — 2026-09-19
+
+The first semantic-writable-view to execution-target bridge is now
+implemented.
+
+The dependency remains:
+
+```text
+WritableRasterView
+        |
+        | package-internal capability derivation
+        v
+RasterTargetPlane
+```
+
+and not the reverse.
+
+`WritableRasterView` therefore remains independent of:
+
+```text
+RasterTargetPlane
+Mir
+operation-specific target types
+```
+
+The bridge is defined in the existing internal target layer and consumes:
+
+```text
+WritableRasterView
+PlaneExecutionTraits
+mutable region-origin execution pointer
+```
+
+For a non-empty plane derivation requires:
+
+```text
+valid logical plane index
+linearContiguous1D == true
+representable flatElementCount
+certified mutable execution base
+```
+
+Canonical padded and Universal / negative-stride planes are deliberately
+rejected.
+
+No Canonical or Universal writable target type is introduced because no
+current production consumer requires one.
+
+Empty regions remain a semantic special case:
+
+```text
+valid empty writable plane
+    ->
+valid empty RasterTargetPlane
+
+width / height
+    preserved
+
+elementCount
+    0
+
+executionBase
+    null
+```
+
+No mutable execution pointer is formed for that case.
+
+The bridge establishes no additional ownership or alias semantics.
+
+In particular it does not imply:
+
+```text
+unique ownership
+exclusive borrowing
+noalias
+source/target non-overlap
+thread exclusivity
+```
+
+Those properties remain outside `RasterTargetPlane`, exactly as before.
+
+A single new target-layer trusted boundary materializes D slice metadata from
+an already-certified mutable execution pointer:
+
+```text
+T* + flatElementCount
+        |
+        | narrow @trusted
+        v
+T[]
+        |
+        v
+existing RasterTargetPlane constructor
+```
+
+The higher-level `WritableRasterView -> RasterTargetPlane` bridge itself
+remains `@safe`.
+
+The existing target constructor is reused rather than duplicating its
+dimension/count invariants.
+
+##### DIP1000 provenance result
+
+E5.4e.2 exposed an important D-specific lifetime detail.
+
+The successful provenance chain is:
+
+```text
+return scope WritableRasterView
+        |
+        v
+executionRegionBase
+        |
+        v
+ordinary local auto pointer alias
+        |
+        v
+ordinary local auto slice alias
+        |
+        v
+RasterTargetPlane
+        |
+        v
+optional Mir target
+```
+
+DMD and LDC preserve the originating `return scope` provenance through those
+ordinary local aliases.
+
+An earlier probe instead declared the intermediate aliases as:
+
+```d
+scope auto base
+scope auto storage
+```
+
+and the positive return path was rejected with diagnostics equivalent to:
+
+```text
+returning scope variable storage is not allowed
+```
+
+Removing those local `scope` declarations produced the intended behavior.
+
+This is a useful distinction:
+
+```text
+return scope
+    describes provenance that may be returned with the originating borrow
+
+local scope
+    restricts the local alias itself from escaping its local lifetime
+```
+
+Adding `scope` to every intermediate alias is therefore not monotonically
+"safer". In this case it unnecessarily shortened an already-correct lifetime
+relationship.
+
+The same result applies transitively through the existing Mir adapter.
+
+Both DMD and LDC accept:
+
+```text
+caller return-scope WritableRasterView
+    -> RasterTargetPlane
+    -> return
+
+caller return-scope WritableRasterView
+    -> RasterTargetPlane
+    -> Mir writable target
+    -> return
+```
+
+Both reject:
+
+```text
+ordinary scope WritableRasterView
+    -> returned RasterTargetPlane
+
+ordinary scope WritableRasterView
+    -> returned Mir target
+
+ordinary scope WritableRasterView
+    -> global RasterTargetPlane
+
+const WritableRasterView
+    -> mutable RasterTargetPlane
+```
+
+Runtime tests with both compilers verify:
+
+```text
+flat contiguous derivation and mutation
+Canonical padded rejection
+Universal / negative-stride rejection
+empty target shape preservation
+invalid plane rejection
+one-row ROI becoming flat contiguous
+correct ROI execution origin
+```
+
+The existing target representation, Mir target adapters and operation kernels
+are unchanged, so no performance benchmark was required for E5.4e.2.
+
+E5.4e.3 is now the next implementation step.
+
+Its purpose is narrower than adding another execution abstraction:
+
+```text
+existing checked copy
+existing exact ubyte -> float conversion
+        |
+        v
+obtain destination through
+WritableRasterView -> RasterTargetPlane
+```
+
+The integration must preserve the current operation-specific safety checks,
+especially invocation-local source/target physical non-overlap.
 
 E5.4f
     redesign public operation contracts independently of current dispatchers

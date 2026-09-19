@@ -23,7 +23,10 @@ Current core status:
 - `WritableRasterView` now exposes the minimal package-internal execution
   primitives required by the existing contiguous writable-target consumers:
   shared plane-layout classification and a lifetime-bound mutable region-origin
-  execution pointer.
+  execution pointer;
+- flat-contiguous planes of a certified `WritableRasterView` can now derive the
+  existing package-internal `RasterTargetPlane` capability while preserving
+  DIP1000 lifetime provenance through the target and existing Mir adapters.
 
 The current raster-operations sequence is:
 
@@ -37,6 +40,9 @@ E5.4d.1a writable backing certification               complete
 E5.4d.1b semantic WritableRasterView implementation   complete
 E5.4d.1c RasterLease -> writable borrow                complete
 E5.4e    writable execution capabilities              in progress
+E5.4e.1  writable execution primitives                complete
+E5.4e.2  WritableRasterView -> RasterTargetPlane       complete
+E5.4e.3  existing consumer integration                next
 E5.4f    public operation contract redesign            not started
 E5.4g    stable public operation exposure              not started
 ```
@@ -46,9 +52,10 @@ write permission but does not imply uniqueness, non-aliasing, contiguity or
 thread exclusivity.
 
 The resident raster/view core now includes both read-only and writable
-lease-bound lifetime integration. Remaining work before API stabilization is
-primarily the writable execution bridge and the public operation-contract
-design.
+lease-bound lifetime integration plus the first contiguous writable execution
+bridge. Remaining work before API stabilization is primarily integration of
+that bridge into the existing copy/conversion consumers and the public
+operation-contract design.
 
 M2 has partial internal implementation used to validate the engine
 architecture; copy, reduction and conversion machinery are not yet exposed as
