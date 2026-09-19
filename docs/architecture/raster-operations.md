@@ -4,6 +4,9 @@
 
 E5.0 architecture definition.
 
+Current implementation checkpoint: E5.4f public operation contract redesign is
+in progress.
+
 This document defines the conceptual operation layer above the resident raster
 semantics and execution machinery established by E1-E4.
 
@@ -4268,7 +4271,7 @@ E5.4d.1
 
 E5.4e
     derive internal writable execution capabilities from that view
-    -> in progress
+    -> complete
 
 #### E5.4e.0 writable execution consumer audit — 2026-09-19
 
@@ -5005,15 +5008,283 @@ The next stage is E5.4f.
 
 E5.4f
     redesign public operation contracts independently of current dispatchers
-    -> next
+    -> in progress
 
 E5.4g
     expose only operation semantics supported by stable contracts
+    -> not started
 ```
 
 Reduction may ultimately be exposable earlier than source-to-target operations,
 but E5.4a intentionally does not create a partial public operation namespace
 before the overall semantic surface has been reviewed.
+
+
+#### E5.4f public operation contract redesign checkpoint — 2026-09-19
+
+E5.4f does not expose the existing internal dispatchers directly.
+
+The public contract is being derived independently from the observable
+semantics required by concrete raster-operation consumers.
+
+The current public raster package therefore remains unchanged while this work
+is in progress.
+
+
+##### E5.4f.0–f.1 contract audits
+
+The initial operation and public-surface audits confirmed that the existing
+internal operations are useful evidence but are not themselves the public API.
+
+The public design must continue to distinguish:
+
+```text
+semantic operation
+execution capability
+operand relationship
+kernel implementation
+```
+
+and must not expose Mir, execution traits, internal target representations or
+current dispatcher result types merely because they already exist.
+
+The current public raster surface remains intentionally smaller than the
+package-internal execution machinery.
+
+
+##### E5.4f.2 writable affine execution gap
+
+The existing `RasterTargetPlane` boundary represents flat contiguous writable
+storage.
+
+That remains sufficient for the current checked-copy and exact-conversion
+implementations, but it is not sufficient to reason about the general affine
+destination layouts that a future source-to-target raster operation contract
+may need to accept.
+
+A general affine destination requires access to:
+
+```text
+row stride
+sample stride
+```
+
+without implying contiguity.
+
+This creates a concrete need for writable execution-stride metadata during the
+E5.4f production-mapping work.
+
+It does not by itself justify a new general writable-target type hierarchy.
+
+
+##### E5.4f.3 bulk-write alias contract
+
+Bulk writes require relational guarantees beyond the semantic fact that a
+destination is writable.
+
+The current research contract is:
+
+```text
+source self-aliasing
+    permitted
+
+destination mapping
+    must be injective
+
+actual physical source/target sample-byte overlap
+    unsupported
+
+unsupported overlap
+    rejected before the first write
+```
+
+Destination injectivity is a property of the finite affine mapping, not merely
+of a bounding address interval.
+
+For the two-dimensional element offset
+
+```text
+offset = x * sampleStride + y * rowStride
+```
+
+and non-zero strides, define:
+
+```text
+g  = gcd(abs(sampleStride), abs(rowStride))
+dx = abs(rowStride) / g
+dy = abs(sampleStride) / g
+```
+
+A repeated element address occurs inside the finite destination rectangle
+exactly when:
+
+```text
+dx <= width  - 1
+and
+dy <= height - 1
+```
+
+with zero-stride cases handled separately.
+
+The finite-grid injectivity rule was checked against brute-force enumeration
+for 30625 cases with both DMD and LDC.
+
+
+##### E5.4f.4 exact affine physical-overlap research
+
+Bounding address envelopes are insufficient to decide exact overlap between
+general affine raster views.
+
+Two views can have overlapping address envelopes while none of their reachable
+sample bytes overlap.
+
+The exact research model decomposes each finite two-dimensional affine view
+into the smaller of its row or column line families.
+
+Each line is represented as a finite arithmetic progression of sample
+addresses.
+
+Pairwise byte overlap can then be reduced to a bounded linear Diophantine
+problem, including the displacement introduced by source and destination
+sample sizes.
+
+The affine overlap model was checked against brute-force enumeration for:
+
+```text
+360000 cases
+```
+
+with both DMD and LDC.
+
+The research also verified a bounding-envelope counterexample and
+full-address-width edge cases.
+
+One implementation constraint is important for later production code.
+
+A naive formulation that enumerates every possible byte displacement costs:
+
+```text
+O(sourceSampleSize + targetSampleSize)
+```
+
+`isRasterSampleType` currently permits arbitrary unqualified POD sample types
+without imposing a small `sizeof(T)` bound.
+
+Production overlap analysis therefore must not silently assume scalar-sized
+samples.
+
+The production implementation must either accept and document that complexity
+or use a more direct interval/congruence formulation.
+
+
+##### E5.4f.5 checked wide arithmetic
+
+Affine relation analysis may require intermediate integer magnitudes outside
+the native signed pointer-difference range even when the final represented
+addresses are valid.
+
+The arithmetic research therefore selected a wide signed representation based
+on:
+
+```text
+sign
++
+unsigned magnitude
+```
+
+rather than relying on signed negation of minimum-width native values.
+
+This matters in particular for values such as:
+
+```text
+ptrdiff_t.min
+```
+
+whose absolute magnitude cannot be represented by simply negating the same
+signed type.
+
+The research verification covered:
+
+```text
+sign+magnitude arithmetic
+    40401 cases
+
+wide division
+    8040 cases
+
+bounded wide Diophantine solving
+    792756 cases
+
+wide affine 2D overlap equivalence
+    360000 cases
+```
+
+including full-width address-arithmetic edge cases.
+
+These results establish mathematical machinery for production mapping.
+
+They do not establish a need for a public wide-integer abstraction.
+
+
+##### E5.4f.5c production mapping
+
+E5.4f.5c is mapping the accepted research contracts onto the existing raster
+implementation.
+
+The first production slice, E5.4f.5c.1, adds the package-internal writable
+counterpart of the existing read-only execution-stride query:
+
+```text
+WritableRasterView.tryExecutionPlaneStrides(...)
+```
+
+The query:
+
+```text
+accepts a logical plane index
+
+returns rowStrideElements
+returns sampleStrideElements
+
+resets both outputs to zero before failure
+
+rejects an invalid plane index
+```
+
+The method exposes metadata already present in the certified writable view.
+
+It does not create or imply:
+
+```text
+destination injectivity
+source/target non-overlap
+contiguity
+unique ownership
+exclusive access
+thread exclusivity
+```
+
+Those remain separate semantic or operation-local facts.
+
+E5.4f.5c remains in progress.
+
+The next implementation slice is E5.4f.5c.2.
+
+Its production shape must be justified by the completed E5.4f research and a
+concrete operation consumer. The implementation must not be generalized merely
+because the underlying arithmetic supports a broader abstraction.
+
+E5.4g remains blocked until the intended public operation surface has an
+explicitly reviewed contract for:
+
+```text
+observable semantics
+errors
+lifetime
+alias behavior
+source compatibility
+```
+
 
 ## E5.0 decision
 

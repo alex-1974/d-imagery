@@ -43,12 +43,23 @@ E5.4d    semantic writable-view contract              complete
 E5.4d.1a writable backing certification               complete
 E5.4d.1b semantic WritableRasterView implementation   complete
 E5.4d.1c RasterLease -> writable borrow                complete
-E5.4e    writable execution capabilities              complete
-E5.4e.1  writable execution primitives                complete
-E5.4e.2  WritableRasterView -> RasterTargetPlane       complete
-E5.4e.3  existing consumer integration                complete
-E5.4f    public operation contract redesign            next
-E5.4g    stable public operation exposure              not started
+E5.4e        writable execution capabilities              complete
+E5.4e.1      writable execution primitives                complete
+E5.4e.2      WritableRasterView -> RasterTargetPlane       complete
+E5.4e.3      existing consumer integration                complete
+E5.4f        public operation contract redesign            in progress
+E5.4f.0      initial contract audit                        complete
+E5.4f.1      public contract matrix audit                  complete
+E5.4f.2      writable affine execution-gap audit           complete
+E5.4f.3      bulk-write alias contract                     complete
+E5.4f.4      exact affine overlap research                 complete
+E5.4f.5a     checked-arithmetic carrier audit              complete
+E5.4f.5b.1   sign+magnitude wide arithmetic                complete
+E5.4f.5b.2a  bounded wide Diophantine solver               complete
+E5.4f.5b.2b  affine-overlap equivalence                    complete
+E5.4f.5c     production mapping audit                      in progress
+E5.4f.5c.1   writable execution stride query               complete
+E5.4g        stable public operation exposure              not started
 ```
 
 `WritableRasterView` is intentionally still package-internal. It establishes
@@ -58,8 +69,12 @@ thread exclusivity.
 The resident raster/view core now includes both read-only and writable
 lease-bound lifetime integration, the first contiguous writable execution
 bridge, and verified integration of that bridge with the existing checked copy
-and exact conversion consumers. The next work before API stabilization is the
-public operation-contract redesign.
+and exact conversion consumers.
+
+The public operation-contract redesign is now in progress. The current work is
+mapping the completed E5.4f alias, affine-layout, exact-overlap and checked-wide-
+arithmetic research into the smallest production machinery required by concrete
+copy/conversion consumers. No public operation API is stabilized yet.
 
 M2 has partial internal implementation used to validate the engine
 architecture; copy, reduction and conversion machinery are not yet exposed as

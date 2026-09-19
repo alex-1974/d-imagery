@@ -27,10 +27,14 @@ The retained raster foundation now includes:
 - a package-internal semantic `WritableRasterView`;
 - a lease-bound package-internal writable borrow from `RasterLease`.
 
-The writable semantic layer is not public yet. Semantic lifetime integration is
-complete; the next unfinished step is deriving internal writable execution
-capabilities from `WritableRasterView`. Stable public operation contracts come
-afterwards.
+The writable semantic and execution layers are not public yet. E5.4e is
+complete: retained writable backing can flow through the package-internal
+`WritableRasterView` into the existing `RasterTargetPlane` execution boundary
+used by checked copy and exact conversion consumers.
+
+E5.4f is now in progress and is redesigning the public operation contracts from
+their required semantics rather than exposing the existing internal
+dispatchers. Stable public operation exposure remains deferred to E5.4g.
 
 The public API remains experimental. Performance-sensitive implementation is
 developed from measured evidence and validated with both DMD and LDC.
