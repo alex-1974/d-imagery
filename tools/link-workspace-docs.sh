@@ -17,6 +17,7 @@ files=(
     ROADMAP.md
     DESIGN_PRINCIPLES.md
     RESEARCH.md
+    DLANG_PRACTICES.md
 )
 
 for file in "${files[@]}"; do
