@@ -383,12 +383,43 @@ WritableRasterView!ubyte escaped;
 D
 
 
+cat > "$tmp_dir/external_lease_surface.d" <<'D'
+module raster_writable_view_negative_external_lease_surface;
+
+import imagery.raster :
+    RasterLease;
+
+
+/*
+ * MUST FAIL.
+ *
+ * Lease-bound writable borrowing remains package-internal while
+ * WritableRasterView is package-internal.
+ */
+@safe
+bool externalWritableBorrow(
+    ref RasterLease!ubyte lease
+)
+{
+    bool success;
+
+    auto view =
+        lease.tryWritableView(
+            success
+        );
+
+    return success && !view.empty;
+}
+D
+
+
 compile_probe positive pass
 compile_probe local_escape reject
 compile_probe global_escape reject
 compile_probe const_roi reject
 compile_probe raw_constructor_surface reject
 compile_probe external_surface reject
+compile_probe external_lease_surface reject
 
 echo "FAILURES=$failures"
 

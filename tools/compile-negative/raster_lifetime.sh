@@ -183,6 +183,171 @@ void storeGlobally()
 D
 
 
+cat > "$tmp_dir/writable_positive.d" <<'D'
+module imagery.raster.raster_lifetime_writable_positive;
+
+private size_t[3] releases;
+
+import imagery.raster.backing :
+    makeWritableLifetimeTestLease;
+
+
+/*
+ * MUST PASS:
+ *
+ * A mutable lease retaining readWrite resources may publish a writable view
+ * for local use.
+ */
+@safe
+bool validWritableBorrow()
+{
+    auto lease =
+        makeWritableLifetimeTestLease(
+            releases.ptr
+        );
+
+    bool success;
+
+    scope auto view =
+        lease.tryWritableView(
+            success
+        );
+
+    if (!success)
+        return false;
+
+    if (
+        !view.trySetSample(
+            0,
+            1,
+            1,
+            77
+        )
+    )
+    {
+        return false;
+    }
+
+    ubyte value;
+
+    return
+        view.trySample(
+            0,
+            1,
+            1,
+            value
+        )
+        && value == 77;
+}
+D
+
+
+cat > "$tmp_dir/writable_return.d" <<'D'
+module imagery.raster.raster_lifetime_writable_negative_return;
+
+private size_t[3] releases;
+
+import imagery.raster.backing :
+    makeWritableLifetimeTestLease;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST FAIL:
+ *
+ * WritableRasterView may not outlive a local RasterLease.
+ */
+@safe
+WritableRasterView!ubyte escapeWritableView()
+{
+    auto lease =
+        makeWritableLifetimeTestLease(
+            releases.ptr
+        );
+
+    bool success;
+
+    return lease.tryWritableView(
+        success
+    );
+}
+D
+
+
+cat > "$tmp_dir/writable_global.d" <<'D'
+module imagery.raster.raster_lifetime_writable_negative_global;
+
+private size_t[3] releases;
+
+import imagery.raster.backing :
+    makeWritableLifetimeTestLease;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+WritableRasterView!ubyte escaped;
+
+
+/*
+ * MUST FAIL:
+ *
+ * Writable lease borrow may not escape into global storage.
+ */
+@safe
+void storeWritableGlobally()
+{
+    auto lease =
+        makeWritableLifetimeTestLease(
+            releases.ptr
+        );
+
+    bool success;
+
+    escaped =
+        lease.tryWritableView(
+            success
+        );
+}
+D
+
+
+cat > "$tmp_dir/writable_const_lease.d" <<'D'
+module imagery.raster.raster_lifetime_writable_negative_const_lease;
+
+private size_t[3] releases;
+
+import imagery.raster.backing :
+    makeWritableLifetimeTestLease;
+
+
+/*
+ * MUST FAIL:
+ *
+ * A const RasterLease must not be usable to recover writable capability.
+ */
+@safe
+void writableFromConstLease()
+{
+    const lease =
+        makeWritableLifetimeTestLease(
+            releases.ptr
+        );
+
+    bool success;
+
+    auto view =
+        lease.tryWritableView(
+            success
+        );
+
+    cast(void) view;
+}
+D
+
+
 compile_probe()
 {
     name="$1"
@@ -235,6 +400,11 @@ compile_probe positive pass
 compile_probe return_view reject
 compile_probe return_roi reject
 compile_probe global reject
+
+compile_probe writable_positive pass
+compile_probe writable_return reject
+compile_probe writable_global reject
+compile_probe writable_const_lease reject
 
 echo "FAILURES=$failures"
 

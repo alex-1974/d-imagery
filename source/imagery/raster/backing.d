@@ -31,6 +31,8 @@ import imagery.raster.sample :
     isRasterSampleType;
 
 import imagery.raster.validation :
+    BackingValidationResult,
+    WritableBackingCertificationResult,
     validateRasterBackingLayout;
 
 import imagery.raster.region :
@@ -39,6 +41,10 @@ import imagery.raster.region :
 import imagery.raster.view :
     RasterView,
     makeRasterViewAssumeValidated;
+
+import imagery.raster.writable_view :
+    WritableRasterView,
+    tryMakeWritableRasterView;
 
 
 /++
@@ -219,6 +225,49 @@ nothrow
 
 
 /++
+    Attempts to derive a semantic writable view from one already-retained
+    RasterBacking.
+
+    Lifetime of the returned view remains tied to `backing`.
+
+    The backing entered retained ownership only after ordinary validation.
+    E5.4d.1c nevertheless deliberately reuses the existing complete writable
+    factory instead of introducing a second assume-validated construction
+    boundary.
+
+    This keeps writable capability creation behind the established sequence:
+
+        ordinary validation
+            ->
+        writable certification
+            ->
+        semantic writable view
+
+    The duplicate ordinary validation is control-plane work and may only be
+    optimized later if evidence shows that it matters.
++/
+private
+WritableRasterView!T makeWritableViewFromBacking(T)(
+    return ref RasterBacking!T backing
+)
+@safe
+nothrow
+@nogc
+{
+    BackingValidationResult validation;
+    WritableBackingCertificationResult certification;
+
+    return tryMakeWritableRasterView!T(
+        backing.resources_,
+        backing.descriptors_,
+        backing.fullRegion_,
+        validation,
+        certification
+    );
+}
+
+
+/++
     Lifetime capability for a retained raster representation.
 
     Copying a RasterLease retains the same backing representation.
@@ -279,11 +328,81 @@ public:
             makeViewFromBacking!T
         );
     }
+
+
+    /++
+        Attempts to return a non-owning writable semantic view borrowing from
+        this lease.
+
+        This operation is deliberately package-internal while
+        WritableRasterView itself remains package-internal.
+
+        A mutable RasterLease receiver is required. A const lease must not be
+        usable to recover write capability.
+
+        `success` is false for:
+
+        - RasterLease.init / an uninitialized retained owner;
+        - invalid retained metadata detected defensively by the reused factory;
+        - a backing whose represented planes are not completely covered by
+          retained readWrite resources.
+
+        On failure WritableRasterView.init is returned.
+
+        On success the returned WritableRasterView remains lifetime-bound to
+        this lease exactly as RasterView returned by view() is.
+
+        Writable capability does not imply uniqueness, exclusivity, noalias,
+        contiguity, non-overlap, or thread exclusivity.
+    +/
+    package(imagery.raster)
+    WritableRasterView!T tryWritableView(
+        out bool success
+    )
+    return
+    @trusted
+    nothrow
+    @nogc
+    {
+        success = false;
+
+        if (!owner_.refCountedStore.isInitialized)
+        {
+            return WritableRasterView!T.init;
+        }
+
+
+        scope auto view =
+            owner_.borrow!(
+                makeWritableViewFromBacking!T
+            );
+
+        /*
+         * Ordinary backing validation requires at least one logical plane.
+         *
+         * Therefore:
+         *
+         *     successful writable view -> planeCount > 0
+         *     failed factory           -> WritableRasterView.init
+         *                              -> planeCount == 0
+         *
+         * This remains true for geometrically empty rasters: an empty
+         * Region2D still retains its logical plane metadata.
+         */
+        success =
+            view.planeCount != 0;
+
+        return view;
+    }
 }
 
 
 version (unittest)
 {
+
+import imagery.raster.resource :
+    ResourceAccess;
+
 
 /*
  * The remaining declarations are test-only helpers.
@@ -442,6 +561,40 @@ RasterLease!ubyte makeLifetimeTestLease(
         makeLifetimeTestBacking(
             releaseCounters
         );
+
+    auto owner =
+        safeRefCounted(
+            move(backing)
+        );
+
+    return RasterLease!ubyte(
+        move(owner)
+    );
+}
+
+
+/++
+    Creates the same lifetime-test backing with explicit retained write access.
+
+    The ordinary makeLifetimeTestLease helper deliberately remains read-only so
+    tests cover both certification failure and success.
++/
+@trusted
+RasterLease!ubyte makeWritableLifetimeTestLease(
+    size_t* releaseCounters
+)
+{
+    auto backing =
+        makeLifetimeTestBacking(
+            releaseCounters
+        );
+
+    foreach (ref resource; backing.resources_)
+    {
+        resource.access =
+            ResourceAccess.readWrite;
+    }
+
 
     auto owner =
         safeRefCounted(
@@ -620,6 +773,176 @@ unittest
         releases[]
         == [1, 1, 1]
     );
+}
+
+
+
+unittest
+{
+    /*
+     * The ordinary lifetime-test backing carries default read-only access.
+     *
+     * It remains readable but must not publish writable capability.
+     */
+    size_t[3] releases =
+        [0, 0, 0];
+
+    {
+        auto lease =
+            makeLifetimeTestLease(
+                releases.ptr
+            );
+
+        bool success = true;
+
+        scope auto writable =
+            lease.tryWritableView(
+                success
+            );
+
+        assert(!success);
+        assert(writable.planeCount == 0);
+
+        auto readable =
+            lease.view();
+
+        ubyte value;
+
+        assert(
+            readable.trySample(
+                1,
+                2,
+                1,
+                value
+            )
+        );
+
+        assert(value == 112);
+    }
+
+    assert(
+        releases[]
+        == [1, 1, 1]
+    );
+}
+
+
+unittest
+{
+    /*
+     * Explicit readWrite provenance may publish a lease-bound writable view.
+     *
+     * Mutation through that view is immediately observable through an ordinary
+     * read-only view of the same retained backing. No uniqueness is implied.
+     */
+    size_t[3] releases =
+        [0, 0, 0];
+
+    {
+        auto lease =
+            makeWritableLifetimeTestLease(
+                releases.ptr
+            );
+
+        bool success;
+
+        scope auto writable =
+            lease.tryWritableView(
+                success
+            );
+
+        assert(success);
+        assert(writable.planeCount == 3);
+        assert(writable.width == 4);
+        assert(writable.height == 3);
+
+        assert(
+            writable.trySetSample(
+                1,
+                2,
+                1,
+                199
+            )
+        );
+
+
+        auto readable =
+            lease.view();
+
+        ubyte value;
+
+        assert(
+            readable.trySample(
+                1,
+                2,
+                1,
+                value
+            )
+        );
+
+        assert(value == 199);
+
+
+        bool roiSuccess;
+
+        scope auto roi =
+            writable.tryRoi(
+                Region2D(
+                    1,
+                    1,
+                    2,
+                    2
+                ),
+                roiSuccess
+            );
+
+        assert(roiSuccess);
+
+        assert(
+            roi.trySetSample(
+                2,
+                1,
+                1,
+                231
+            )
+        );
+
+        assert(
+            readable.trySample(
+                2,
+                2,
+                2,
+                value
+            )
+        );
+
+        assert(value == 231);
+    }
+
+    assert(
+        releases[]
+        == [1, 1, 1]
+    );
+}
+
+
+unittest
+{
+    /*
+     * The fallible lease API handles RasterLease.init without entering
+     * SafeRefCounted.borrow on an uninitialized store.
+     */
+    RasterLease!ubyte lease;
+
+    bool success = true;
+
+    scope auto writable =
+        lease.tryWritableView(
+            success
+        );
+
+    assert(!success);
+    assert(writable.planeCount == 0);
 }
 
 
