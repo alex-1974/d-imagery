@@ -102,6 +102,26 @@ expected to become the primary performance compiler.
 
 See `ROADMAP.md`, `DESIGN.md` and `BENCHMARK.md`.
 
+## Compiler support
+
+The source/frontend compatibility floor is DMD/Phobos 2.101. The corresponding
+LDC generation is LDC 1.31.0.
+
+Concrete compiler-package floors vary by platform because older macOS compiler
+packages are not compatible with current macOS 15 runners:
+
+| Platform | DMD | LDC |
+| --- | --- | --- |
+| Linux x86-64 | 2.101.2 | 1.31.0 |
+| Linux ARM64 | — | 1.31.0 |
+| Windows x86-64 | 2.101.2 | 1.31.0 |
+| macOS x86-64 | 2.112.1 | 1.41.0 |
+| macOS ARM64 | — | 1.41.0 |
+| Windows ARM64 | experimental | experimental |
+
+Current DMD and LDC releases remain part of the normal CI matrix. See
+`docs/research/compiler-floor-audit.md` for the evidence and boundary tests.
+
 ## Workspace context
 
 When developed inside `d-geospatial-workspace`, current shared architecture
