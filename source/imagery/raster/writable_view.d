@@ -197,6 +197,49 @@ public:
 
 
     /++
+        Attempts to expose the signed physical strides required by an
+        internal writable execution consumer.
+
+        This mirrors RasterView.tryExecutionPlaneStrides().
+
+        The query exposes metadata only:
+
+        - no mutable pointer is formed;
+        - no write capability is created;
+        - no uniqueness, exclusivity or noalias property is established.
+
+        On failure both output strides are reset to zero.
+    +/
+    package(imagery.raster)
+    bool tryExecutionPlaneStrides(
+        size_t planeIndex,
+        out ptrdiff_t rowStrideElements,
+        out ptrdiff_t sampleStrideElements
+    ) const
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        rowStrideElements = 0;
+        sampleStrideElements = 0;
+
+        if (planeIndex >= planes_.length)
+        {
+            return false;
+        }
+
+        rowStrideElements =
+            planes_[planeIndex].rowStrideElements;
+
+        sampleStrideElements =
+            planes_[planeIndex].sampleStrideElements;
+
+        return true;
+    }
+
+
+    /++
         Resolves the mutable physical address of the first logical sample of
         one writable plane in the current region.
 
@@ -1090,6 +1133,94 @@ unittest
     assert(value == ubyte.init);
 }
 
+
+
+unittest
+{
+    /*
+     * Writable execution metadata exposes the exact validated signed
+     * descriptor strides without forming a mutable execution pointer.
+     */
+    ubyte[16] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr + 7,
+            -5,
+            -2
+        )
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                2,
+                2
+            )
+        );
+
+    ptrdiff_t rowStride;
+    ptrdiff_t sampleStride;
+
+    assert(
+        writable.tryExecutionPlaneStrides(
+            0,
+            rowStride,
+            sampleStride
+        )
+    );
+
+    assert(rowStride == -5);
+    assert(sampleStride == -2);
+}
+
+
+unittest
+{
+    /*
+     * Invalid writable plane selection is a controlled metadata-query
+     * failure and resets both outputs.
+     */
+    ubyte[4] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                1
+            )
+        );
+
+    ptrdiff_t rowStride = 91;
+    ptrdiff_t sampleStride = 92;
+
+    assert(
+        !writable.tryExecutionPlaneStrides(
+            1,
+            rowStride,
+            sampleStride
+        )
+    );
+
+    assert(rowStride == 0);
+    assert(sampleStride == 0);
+}
 
 
 unittest
