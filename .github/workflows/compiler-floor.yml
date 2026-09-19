@@ -17,49 +17,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: DMD 2.100.2 / frontend 2.100
-            compiler: dmd-2.100.2
+          - name: Linux x86-64 / DMD 2.101.2
+            os: ubuntu-24.04
+            compiler: dmd-2.101.2
 
-          - name: LDC 1.30.0 / frontend 2.100
-            compiler: ldc-1.30.0
+          - name: Linux x86-64 / LDC 1.31.0
+            os: ubuntu-24.04
+            compiler: ldc-1.31.0
 
-          - name: DMD 2.099.1 / frontend 2.099
-            compiler: dmd-2.099.1
+          - name: Linux ARM64 / LDC 1.31.0
+            os: ubuntu-24.04-arm
+            compiler: ldc-1.31.0
 
-          - name: LDC 1.29.0 / frontend 2.099
-            compiler: ldc-1.29.0
+          - name: Windows x86-64 / DMD 2.101.2
+            os: windows-2025
+            compiler: dmd-2.101.2
 
-          - name: DMD 2.098.1 / frontend 2.098
-            compiler: dmd-2.098.1
+          - name: Windows x86-64 / LDC 1.31.0
+            os: windows-2025
+            compiler: ldc-1.31.0
 
-          - name: LDC 1.28.1 / frontend 2.098
-            compiler: ldc-1.28.1
+          - name: macOS x86-64 / DMD 2.101.2
+            os: macos-15-intel
+            compiler: dmd-2.101.2
 
-          - name: DMD 2.097.2 / frontend 2.097
-            compiler: dmd-2.097.2
+          - name: macOS x86-64 / LDC 1.31.0
+            os: macos-15-intel
+            compiler: ldc-1.31.0
 
-          - name: LDC 1.27.1 / frontend 2.097
-            compiler: ldc-1.27.1
+          - name: macOS ARM64 / LDC 1.31.0
+            os: macos-15
+            compiler: ldc-1.31.0
 
-          - name: DMD 2.096.1 / frontend 2.096
-            compiler: dmd-2.096.1
-
-          - name: LDC 1.26.0 / frontend 2.096
-            compiler: ldc-1.26.0
-
-          - name: DMD 2.095.1 / frontend 2.095
-            compiler: dmd-2.095.1
-
-          - name: LDC 1.25.0 / frontend 2.095
-            compiler: ldc-1.25.0
-
-          - name: DMD 2.094.2 / frontend 2.094
-            compiler: dmd-2.094.2
-
-          - name: LDC 1.24.0 / frontend 2.094
-            compiler: ldc-1.24.0
-
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
