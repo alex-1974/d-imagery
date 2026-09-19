@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      # Temporary validation trigger; remove after the research-branch run passes.
-      - research/compiler-floor-audit
   pull_request:
   workflow_dispatch:
 
