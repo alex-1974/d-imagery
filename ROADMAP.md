@@ -19,7 +19,11 @@ Current core status:
   sample write semantics is implemented and DIP1000-tested with DMD and LDC;
 - `RasterLease` can derive a package-internal lease-bound writable borrow from
   retained `readWrite` resources, while const leases and escaping borrows are
-  rejected by the DIP1000 lifetime model.
+  rejected by the DIP1000 lifetime model;
+- `WritableRasterView` now exposes the minimal package-internal execution
+  primitives required by the existing contiguous writable-target consumers:
+  shared plane-layout classification and a lifetime-bound mutable region-origin
+  execution pointer.
 
 The current raster-operations sequence is:
 
@@ -32,7 +36,7 @@ E5.4d    semantic writable-view contract              complete
 E5.4d.1a writable backing certification               complete
 E5.4d.1b semantic WritableRasterView implementation   complete
 E5.4d.1c RasterLease -> writable borrow                complete
-E5.4e    writable execution capabilities              next
+E5.4e    writable execution capabilities              in progress
 E5.4f    public operation contract redesign            not started
 E5.4g    stable public operation exposure              not started
 ```

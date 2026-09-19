@@ -4268,7 +4268,7 @@ E5.4d.1
 
 E5.4e
     derive internal writable execution capabilities from that view
-    -> next
+    -> in progress
 
 #### E5.4e.0 writable execution consumer audit — 2026-09-19
 
@@ -4432,18 +4432,158 @@ The initial E5.4e implementation should therefore be split into:
 E5.4e.1
     add only the writable execution metadata/base primitives required by the
     contiguous target consumer
+    -> complete
 
 E5.4e.2
     derive RasterTargetPlane from WritableRasterView for valid contiguous
     planes, including empty-view semantics and DIP1000 lifetime tests
+    -> next
 
 E5.4e.3
     verify existing copy/conversion consumers can use the derived target
     without exposing WritableRasterView, RasterTargetPlane, Mir, or execution
     layouts publicly
+    -> not started
 ```
 
 No broader writable execution abstraction is justified by current evidence.
+
+
+#### E5.4e.1 writable execution primitives checkpoint — 2026-09-19
+
+The first writable execution slice is now implemented.
+
+`WritableRasterView!T` exposes exactly two new package-internal execution
+primitives:
+
+```text
+tryPlaneExecutionTraits(...)
+executionRegionBase(...)
+```
+
+`tryPlaneExecutionTraits` reuses the existing shared
+`classifyPlaneExecutionLayout` implementation already used by `RasterView`.
+
+No writable-specific layout classifier is introduced.
+
+The resulting behavior remains:
+
+```text
+arbitrary affine / negative sample stride
+    -> Universal
+
+forward unit sample stride with padded rows
+    -> Canonical
+
+fully packed current region
+    -> Contiguous + linearContiguous1D
+```
+
+Empty regions remain:
+
+```text
+Universal
+linearContiguous1D = false
+flatElementCount = 0
+```
+
+because they contain no reachable sample sequence requiring a physical
+execution representation.
+
+`executionRegionBase` is a narrow package-internal trusted boundary that forms
+a mutable `T*` only from an already-certified `WritableRasterView`.
+
+Its proof chain is:
+
+```text
+ordinary backing validation
+        +
+retained readWrite provenance
+        +
+writable backing certification
+        +
+WritableRasterView
+        |
+        v
+mutable region-origin execution pointer
+```
+
+The function does not establish:
+
+```text
+unique ownership
+exclusive borrowing
+noalias
+source/target non-overlap
+thread exclusivity
+```
+
+Those properties remain outside the writable-view capability.
+
+The pointer is lifetime-bound to the writable-view borrow.
+
+DIP1000 compile probes with both DMD and LDC establish:
+
+```text
+const WritableRasterView -> execution traits
+    accepted
+
+mutable scope WritableRasterView -> local mutable execution base
+    accepted
+
+const WritableRasterView -> mutable execution base
+    rejected
+
+scope WritableRasterView -> returned mutable execution base
+    rejected
+
+scope WritableRasterView -> global mutable execution base
+    rejected
+```
+
+Runtime tests additionally verify:
+
+```text
+Contiguous classification
+Canonical padded classification
+Universal negative-stride classification
+empty-region null execution base
+invalid-plane trait reset
+ROI-origin pointer resolution
+```
+
+DMD and LDC unittests pass, the LDC release build passes, and all existing
+compile-negative raster lifetime suites continue to pass under both compilers.
+
+The writable-view trust budget now contains three distinct boundaries:
+
+```text
+makeWritableRasterViewAssumeCertified
+    semantic writable-capability construction
+
+trySetSample
+    checked individual sample mutation
+
+executionRegionBase
+    mutable execution-pointer formation
+```
+
+No writable stride-query API, Mir writable adapter, new writable layout type,
+or `RasterTargetPlane` dependency is added to `WritableRasterView`.
+
+The dependency direction therefore remains ready for E5.4e.2:
+
+```text
+WritableRasterView
+        |
+        v
+internal target derivation
+        |
+        v
+RasterTargetPlane
+```
+
+E5.4e.2 is now the next implementation step.
 
 E5.4f
     redesign public operation contracts independently of current dispatchers
