@@ -320,14 +320,30 @@ nothrow
 version (unittest)
 {
 
+import core.stdc.stdlib :
+    malloc;
+
+import imagery.raster.backing :
+    RasterLease;
+
+import imagery.raster.byte_layout :
+    PlaneByteLayout;
+
 import imagery.raster.descriptor :
     PlaneDescriptor;
 
-import imagery.raster.region :
-    Region2D;
+import imagery.raster.import_owned :
+    tryImportOwnedRaster;
 
 import imagery.raster.internal.target :
     tryBorrowContiguousTarget;
+
+import imagery.raster.owned_resource :
+    OwnedByteResource,
+    tryAdoptMallocResource;
+
+import imagery.raster.region :
+    Region2D;
 
 import imagery.raster.view :
     makeRasterViewAssumeValidated;
@@ -787,6 +803,340 @@ unittest
         relation
         == CheckedPhysicalCopyOutcome.unrepresentable
     );
+}
+
+
+/*
+ * E5.4e.3 retained consumer integration.
+ *
+ * The destination reaches the existing checked-copy dispatcher through the
+ * complete retained writable chain:
+ *
+ *     OwnedByteResource
+ *         -> RasterLease
+ *         -> WritableRasterView
+ *         -> RasterTargetPlane
+ *         -> tryCopyNonOverlappingContiguous1D
+ *
+ * The dispatcher itself is unchanged.
+ */
+unittest
+{
+    enum size_t width = 3;
+    enum size_t height = 2;
+    enum size_t elementCount =
+        width * height;
+
+    enum size_t byteLength =
+        elementCount * ushort.sizeof;
+
+
+    auto sourceMemory =
+        cast(ushort*) malloc(byteLength);
+
+    auto targetMemory =
+        cast(ushort*) malloc(byteLength);
+
+    assert(sourceMemory !is null);
+    assert(targetMemory !is null);
+
+
+    foreach (index; 0 .. elementCount)
+    {
+        sourceMemory[index] =
+            cast(ushort)((index + 1) * 10);
+
+        targetMemory[index] = 0;
+    }
+
+
+    OwnedByteResource sourceResource;
+    OwnedByteResource targetResource;
+
+    assert(
+        tryAdoptMallocResource(
+            cast(void*) sourceMemory,
+            byteLength,
+            sourceResource
+        )
+    );
+
+    assert(
+        tryAdoptMallocResource(
+            cast(void*) targetMemory,
+            byteLength,
+            targetResource
+        )
+    );
+
+
+    RasterLease!ushort sourceLease;
+    RasterLease!ushort targetLease;
+
+
+    const PlaneByteLayout[1] layout =
+    [
+        PlaneByteLayout(
+            0,
+            width * ushort.sizeof,
+            ushort.sizeof
+        )
+    ];
+
+
+    const sourceImport =
+        tryImportOwnedRaster!ushort(
+            sourceResource,
+            layout[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            sourceLease
+        );
+
+    const targetImport =
+        tryImportOwnedRaster!ushort(
+            targetResource,
+            layout[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            targetLease
+        );
+
+    assert(sourceImport.ok);
+    assert(targetImport.ok);
+
+    assert(!sourceResource.ownsResource);
+    assert(!targetResource.ownsResource);
+
+
+    auto source =
+        sourceLease.view();
+
+
+    bool writableSuccess;
+
+    auto writable =
+        targetLease.tryWritableView(
+            writableSuccess
+        );
+
+    assert(writableSuccess);
+
+
+    bool targetSuccess;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            writable,
+            0,
+            targetSuccess
+        );
+
+    assert(targetSuccess);
+
+
+    const result =
+        tryCopyNonOverlappingContiguous1D(
+            source,
+            0,
+            target
+        );
+
+    assert(result.ok);
+
+
+    auto readableTarget =
+        targetLease.view();
+
+    foreach (index; 0 .. elementCount)
+    {
+        ushort value;
+
+        assert(
+            readableTarget.trySample(
+                0,
+                index % width,
+                index / width,
+                value
+            )
+        );
+
+        assert(
+            value
+            == cast(ushort)((index + 1) * 10)
+        );
+    }
+}
+
+
+/*
+ * Deriving RasterTargetPlane from WritableRasterView must not manufacture a
+ * no-alias guarantee.
+ *
+ * A read view and writable target derived from the same retained backing are
+ * legal capabilities. Their concrete physical relation remains an
+ * invocation-local property of the checked-copy dispatcher.
+ *
+ * Therefore this operation reaches the existing overlap check and fails
+ * without modifying storage.
+ */
+unittest
+{
+    enum size_t width = 4;
+    enum size_t height = 1;
+    enum size_t byteLength =
+        width * ubyte.sizeof;
+
+
+    auto memory =
+        cast(ubyte*) malloc(byteLength);
+
+    assert(memory !is null);
+
+    memory[0] = 1;
+    memory[1] = 2;
+    memory[2] = 3;
+    memory[3] = 4;
+
+
+    OwnedByteResource resource;
+
+    assert(
+        tryAdoptMallocResource(
+            cast(void*) memory,
+            byteLength,
+            resource
+        )
+    );
+
+
+    RasterLease!ubyte lease;
+
+
+    const PlaneByteLayout[1] layout =
+    [
+        PlaneByteLayout(
+            0,
+            width,
+            1
+        )
+    ];
+
+
+    const imported =
+        tryImportOwnedRaster!ubyte(
+            resource,
+            layout[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            lease
+        );
+
+    assert(imported.ok);
+    assert(!resource.ownsResource);
+
+
+    auto source =
+        lease.view();
+
+
+    bool writableSuccess;
+
+    auto writable =
+        lease.tryWritableView(
+            writableSuccess
+        );
+
+    assert(writableSuccess);
+
+
+    bool targetSuccess;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            writable,
+            0,
+            targetSuccess
+        );
+
+    assert(targetSuccess);
+
+
+    const result =
+        tryCopyNonOverlappingContiguous1D(
+            source,
+            0,
+            target
+        );
+
+    assert(!result.ok);
+
+    assert(
+        result.error
+        == NonOverlappingCopyError.overlapDetected
+    );
+
+
+    auto verify =
+        lease.view();
+
+    ubyte value;
+
+    assert(
+        verify.trySample(
+            0,
+            0,
+            0,
+            value
+        )
+    );
+
+    assert(value == 1);
+
+    assert(
+        verify.trySample(
+            0,
+            1,
+            0,
+            value
+        )
+    );
+
+    assert(value == 2);
+
+    assert(
+        verify.trySample(
+            0,
+            2,
+            0,
+            value
+        )
+    );
+
+    assert(value == 3);
+
+    assert(
+        verify.trySample(
+            0,
+            3,
+            0,
+            value
+        )
+    );
+
+    assert(value == 4);
 }
 
 }

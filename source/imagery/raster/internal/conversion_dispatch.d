@@ -315,11 +315,27 @@ nothrow
 version (unittest)
 {
 
+import core.stdc.stdlib :
+    malloc;
+
+import imagery.raster.backing :
+    RasterLease;
+
+import imagery.raster.byte_layout :
+    PlaneByteLayout;
+
 import imagery.raster.descriptor :
     PlaneDescriptor;
 
+import imagery.raster.import_owned :
+    tryImportOwnedRaster;
+
 import imagery.raster.internal.target :
     tryBorrowContiguousTarget;
+
+import imagery.raster.owned_resource :
+    OwnedByteResource,
+    tryAdoptMallocResource;
 
 import imagery.raster.region :
     Region2D;
@@ -760,6 +776,203 @@ unittest
         relation
         == PhysicalByteRangeRelation.nonOverlapping
     );
+}
+
+
+/*
+ * E5.4e.3 retained consumer integration.
+ *
+ * The float destination reaches the unchanged conversion dispatcher through:
+ *
+ *     OwnedByteResource
+ *         -> RasterLease!float
+ *         -> WritableRasterView!float
+ *         -> RasterTargetPlane!float
+ *         -> tryConvertUbyteToFloatContiguous1D
+ *
+ * Conversion semantics and invocation-local physical-range checking remain in
+ * the existing dispatcher.
+ */
+unittest
+{
+    enum size_t width = 3;
+    enum size_t height = 2;
+    enum size_t elementCount =
+        width * height;
+
+    enum size_t sourceByteLength =
+        elementCount * ubyte.sizeof;
+
+    enum size_t targetByteLength =
+        elementCount * float.sizeof;
+
+
+    auto sourceMemory =
+        cast(ubyte*) malloc(
+            sourceByteLength
+        );
+
+    auto targetMemory =
+        cast(float*) malloc(
+            targetByteLength
+        );
+
+    assert(sourceMemory !is null);
+    assert(targetMemory !is null);
+
+
+    const ubyte[elementCount] sourceValues =
+        [0, 1, 127, 128, 254, 255];
+
+
+    foreach (index; 0 .. elementCount)
+    {
+        sourceMemory[index] =
+            sourceValues[index];
+
+        targetMemory[index] =
+            -1.0f;
+    }
+
+
+    OwnedByteResource sourceResource;
+    OwnedByteResource targetResource;
+
+    assert(
+        tryAdoptMallocResource(
+            cast(void*) sourceMemory,
+            sourceByteLength,
+            sourceResource
+        )
+    );
+
+    assert(
+        tryAdoptMallocResource(
+            cast(void*) targetMemory,
+            targetByteLength,
+            targetResource
+        )
+    );
+
+
+    RasterLease!ubyte sourceLease;
+    RasterLease!float targetLease;
+
+
+    const PlaneByteLayout[1] sourceLayout =
+    [
+        PlaneByteLayout(
+            0,
+            width,
+            1
+        )
+    ];
+
+    const PlaneByteLayout[1] targetLayout =
+    [
+        PlaneByteLayout(
+            0,
+            width * float.sizeof,
+            float.sizeof
+        )
+    ];
+
+
+    const sourceImport =
+        tryImportOwnedRaster!ubyte(
+            sourceResource,
+            sourceLayout[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            sourceLease
+        );
+
+    const targetImport =
+        tryImportOwnedRaster!float(
+            targetResource,
+            targetLayout[],
+            Region2D(
+                0,
+                0,
+                width,
+                height
+            ),
+            targetLease
+        );
+
+    assert(sourceImport.ok);
+    assert(targetImport.ok);
+
+    assert(!sourceResource.ownsResource);
+    assert(!targetResource.ownsResource);
+
+
+    auto source =
+        sourceLease.view();
+
+
+    bool writableSuccess;
+
+    auto writable =
+        targetLease.tryWritableView(
+            writableSuccess
+        );
+
+    assert(writableSuccess);
+
+
+    bool targetSuccess;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            writable,
+            0,
+            targetSuccess
+        );
+
+    assert(targetSuccess);
+
+
+    const result =
+        tryConvertUbyteToFloatContiguous1D(
+            source,
+            0,
+            target
+        );
+
+    assert(result.ok);
+
+    assert(
+        result.error
+        == UbyteToFloatConversionError.none
+    );
+
+
+    auto readableTarget =
+        targetLease.view();
+
+    foreach (index; 0 .. elementCount)
+    {
+        float value;
+
+        assert(
+            readableTarget.trySample(
+                0,
+                index % width,
+                index / width,
+                value
+            )
+        );
+
+        assert(
+            value
+            == cast(float) sourceValues[index]
+        );
+    }
 }
 
 }
