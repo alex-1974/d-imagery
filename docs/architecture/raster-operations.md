@@ -4443,7 +4443,7 @@ E5.4e.3
     verify existing copy/conversion consumers can use the derived target
     without exposing WritableRasterView, RasterTargetPlane, Mir, or execution
     layouts publicly
-    -> next
+    -> complete
 ```
 
 No broader writable execution abstraction is justified by current evidence.
@@ -4787,24 +4787,225 @@ correct ROI execution origin
 The existing target representation, Mir target adapters and operation kernels
 are unchanged, so no performance benchmark was required for E5.4e.2.
 
-E5.4e.3 is now the next implementation step.
+#### E5.4e.3 existing writable-consumer integration checkpoint — 2026-09-19
 
-Its purpose is narrower than adding another execution abstraction:
+The existing writable execution consumers now have end-to-end regression
+coverage through the retained writable path.
+
+No new production dispatcher, operation wrapper, target representation or
+writable execution abstraction was required.
+
+The verified copy path is:
 
 ```text
-existing checked copy
-existing exact ubyte -> float conversion
+OwnedByteResource
         |
         v
-obtain destination through
-WritableRasterView -> RasterTargetPlane
+RasterLease!T
+        |
+        +----> RasterView!T source
+        |
+        `----> WritableRasterView!T
+                    |
+                    v
+             RasterTargetPlane!T
+                    |
+                    v
+      existing checked copy dispatcher
 ```
 
-The integration must preserve the current operation-specific safety checks,
-especially invocation-local source/target physical non-overlap.
+The verified conversion path is:
+
+```text
+OwnedByteResource
+        |
+        v
+RasterLease!float
+        |
+        v
+WritableRasterView!float
+        |
+        v
+RasterTargetPlane!float
+        |
+        v
+existing exact ubyte -> float conversion dispatcher
+```
+
+The dispatchers themselves remain unchanged.
+
+They continue to accept:
+
+```text
+RasterView source
+RasterTargetPlane target
+```
+
+rather than accepting `RasterLease`, `WritableRasterView`, Mir types or a new
+operation-specific destination abstraction.
+
+This keeps the layering:
+
+```text
+retained ownership / write provenance
+        |
+        v
+semantic writable capability
+        |
+        v
+contiguous execution target
+        |
+        v
+operation-specific validation and dispatch
+```
+
+rather than folding ownership, write permission, layout capability and alias
+relations into one type.
+
+
+##### Alias semantics remain operation-local
+
+The same retained backing may simultaneously provide:
+
+```text
+RasterView
+WritableRasterView
+RasterTargetPlane
+```
+
+within their valid borrow lifetimes.
+
+That does not imply that a concrete operation may safely use those aliases
+together.
+
+An E5.4e.3 regression test deliberately derives:
+
+```text
+same RasterLease
+        |
+        +----> RasterView source
+        |
+        `----> WritableRasterView
+                    |
+                    v
+             RasterTargetPlane target
+```
+
+and invokes the existing checked-copy dispatcher.
+
+The target derivation succeeds because writable capability and contiguous
+execution capability are valid.
+
+The copy itself then returns:
+
+```text
+overlapDetected
+```
+
+before modifying storage.
+
+This confirms that `WritableRasterView -> RasterTargetPlane` does not
+manufacture:
+
+```text
+uniqueness
+exclusivity
+noalias
+source/target non-overlap
+thread exclusivity
+```
+
+Physical source/target non-overlap remains an invocation-local fact established
+inside the operation that requires it.
+
+
+##### Consumer audit result
+
+The consumer audit found the checked copy and exact conversion dispatchers
+already consume `RasterTargetPlane`.
+
+No production call site required migration to a second target API.
+
+The new retained writable path can therefore terminate at the established
+target boundary:
+
+```text
+RasterLease
+    -> WritableRasterView
+    -> RasterTargetPlane
+```
+
+and reuse the existing operation implementations unchanged.
+
+No speculative API was introduced for:
+
+```text
+copyToWritableView
+convertToWritableView
+NonOverlapToken
+WritableCanonicalTarget
+WritableUniversalTarget
+```
+
+The existing Canonical and Universal source execution machinery likewise does
+not justify corresponding writable target types at this stage.
+
+
+##### Verification
+
+DMD and LDC both compile and pass retained end-to-end tests for:
+
+```text
+distinct retained source and destination -> checked copy success
+
+same retained backing as source and destination
+    -> target derivation succeeds
+    -> checked copy reports overlapDetected
+    -> storage remains unchanged
+
+retained ubyte source + retained float destination
+    -> writable target derivation succeeds
+    -> exact conversion succeeds
+    -> converted values are observable through the retained destination lease
+```
+
+The complete existing raster compile-negative suites continue to pass under
+both DMD and LDC.
+
+No benchmark rerun was required because E5.4e.3 changes only regression-test
+coverage. Dispatcher implementations, target representation, Mir adapters and
+hot kernels are unchanged.
+
+
+#### E5.4e conclusion
+
+E5.4e is complete.
+
+The minimum writable execution chain justified by current consumers is now:
+
+```text
+RasterLease
+        |
+        v
+WritableRasterView
+        |
+        | writable execution traits
+        | mutable region-origin execution base
+        v
+RasterTargetPlane
+        |
+        +----> existing checked copy
+        |
+        `----> existing exact ubyte -> float conversion
+```
+
+No broader writable execution abstraction is currently evidence-backed.
+
+The next stage is E5.4f.
 
 E5.4f
     redesign public operation contracts independently of current dispatchers
+    -> next
 
 E5.4g
     expose only operation semantics supported by stable contracts

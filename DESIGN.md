@@ -195,8 +195,10 @@ The lease-bound writable borrow, writable execution primitives and first
 flat-contiguous `WritableRasterView -> RasterTargetPlane` execution bridge are
 now implemented.
 
-`WritableRasterView` remains package-internal while the existing operation
-consumers are integrated and their eventual public contracts are reviewed.
+`WritableRasterView` remains package-internal. Integration with the existing
+checked copy and exact conversion consumers is now verified; the next step is
+to review their eventual public operation contracts without exposing the
+current execution machinery.
 
 Detailed evidence and implementation sequencing are maintained in:
 
