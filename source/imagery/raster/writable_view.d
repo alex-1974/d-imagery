@@ -31,6 +31,11 @@ module imagery.raster.writable_view;
 import imagery.raster.descriptor :
     PlaneDescriptor;
 
+import imagery.raster.internal.execution_layout :
+    PlaneExecutionLayout2D,
+    PlaneExecutionTraits,
+    classifyPlaneExecutionLayout;
+
 import imagery.raster.region :
     Region2D;
 
@@ -146,6 +151,113 @@ public:
     @nogc
     {
         return region_.empty();
+    }
+
+
+    /++
+        Attempts to query execution capabilities for one logical writable
+        plane.
+
+        This is an internal control-plane query.
+
+        It derives layout metadata only and does not itself form a mutable
+        pointer or grant any additional write capability.
+
+        Classification deliberately reuses the same shared execution-layout
+        logic as RasterView.
+
+        On failure `traits` is reset to PlaneExecutionTraits.init.
+    +/
+    package(imagery.raster)
+    bool tryPlaneExecutionTraits(
+        size_t planeIndex,
+        out PlaneExecutionTraits traits
+    ) const
+    @safe
+    pure
+    nothrow
+    @nogc
+    {
+        traits =
+            PlaneExecutionTraits.init;
+
+        if (planeIndex >= planes_.length)
+        {
+            return false;
+        }
+
+        traits =
+            classifyPlaneExecutionLayout(
+                planes_[planeIndex],
+                region_
+            );
+
+        return true;
+    }
+
+
+    /++
+        Resolves the mutable physical address of the first logical sample of
+        one writable plane in the current region.
+
+        This is the narrow trusted mutable execution-pointer boundary.
+
+        Writable certification has already established that mutation of every
+        represented reachable sample is permitted.
+
+        Ordinary backing validation has already established descriptor
+        alignment, coordinate representation, stride-product arithmetic,
+        combined offsets and physical reachability.
+
+        This function therefore consumes an already-established writable
+        capability; it does not create one.
+
+        It establishes no uniqueness, exclusivity, noalias, source/target
+        non-overlap or thread-exclusivity property.
+
+        Empty regions return null before any coordinate conversion or pointer
+        arithmetic.
+
+        The returned pointer remains lifetime-bound to this writable-view
+        borrow.
+    +/
+    package(imagery.raster)
+    T* executionRegionBase(
+        size_t planeIndex
+    )
+    return scope
+    @trusted
+    nothrow
+    @nogc
+    {
+        assert(planeIndex < planes_.length);
+
+        if (region_.empty())
+        {
+            return null;
+        }
+
+
+        const descriptor =
+            planes_[planeIndex];
+
+        assert(descriptor.base !is null);
+
+
+        const signedX =
+            cast(ptrdiff_t) region_.x;
+
+        const signedY =
+            cast(ptrdiff_t) region_.y;
+
+        const offset =
+              signedY * descriptor.rowStrideElements
+            + signedX * descriptor.sampleStrideElements;
+
+        auto base =
+            cast(T*) descriptor.base;
+
+        return base + offset;
     }
 
 
@@ -976,6 +1088,328 @@ unittest
     );
 
     assert(value == ubyte.init);
+}
+
+
+
+unittest
+{
+    /*
+     * Flat contiguous writable storage exposes the same execution traits as
+     * the equivalent RasterView and resolves the mutable region origin.
+     */
+    ubyte[8] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                2
+            )
+        );
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        writable.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.contiguous
+    );
+
+    assert(traits.linearContiguous1D);
+    assert(traits.flatElementCount == 8);
+
+    assert(
+        writable.executionRegionBase(0)
+        == samples.ptr
+    );
+}
+
+
+unittest
+{
+    /*
+     * Padded unit-stride rows remain Canonical but not flat contiguous.
+     *
+     * E5.4e.1 exposes their correct mutable origin without inventing a
+     * Canonical writable execution target.
+     */
+    ubyte[10] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            5,
+            1
+        )
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                2
+            )
+        );
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        writable.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.canonical
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+
+    assert(
+        writable.executionRegionBase(0)
+        == samples.ptr
+    );
+}
+
+
+unittest
+{
+    /*
+     * Negative sample stride remains Universal.
+     */
+    ubyte[8] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr + 3,
+            4,
+            -1
+        )
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                2
+            )
+        );
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        writable.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.universal
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+
+    assert(
+        writable.executionRegionBase(0)
+        == samples.ptr + 3
+    );
+}
+
+
+unittest
+{
+    /*
+     * Empty writable regions retain plane topology but expose no physical
+     * execution pointer and no flat 1D execution capability.
+     */
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor.init
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                10,
+                20,
+                0,
+                0
+            )
+        );
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        writable.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.universal
+    );
+
+    assert(!traits.linearContiguous1D);
+    assert(traits.flatElementCount == 0);
+
+    assert(
+        writable.executionRegionBase(0)
+        is null
+    );
+}
+
+
+unittest
+{
+    /*
+     * Invalid plane index is a controlled metadata-query failure.
+     */
+    ubyte[4] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    auto writable =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                1
+            )
+        );
+
+    PlaneExecutionTraits traits =
+        PlaneExecutionTraits(
+            PlaneExecutionLayout2D.contiguous,
+            true,
+            123
+        );
+
+    assert(
+        !writable.tryPlaneExecutionTraits(
+            1,
+            traits
+        )
+    );
+
+    assert(
+        traits
+        == PlaneExecutionTraits.init
+    );
+}
+
+
+unittest
+{
+    /*
+     * Mutable execution base resolves the current ROI origin rather than the
+     * descriptor-space origin.
+     *
+     * A one-row ROI is flat contiguous even though the parent row stride is
+     * wider than the ROI width.
+     */
+    ubyte[12] samples;
+
+    const PlaneDescriptor[1] descriptors =
+    [
+        PlaneDescriptor(
+            samples.ptr,
+            4,
+            1
+        )
+    ];
+
+    auto parent =
+        makeWritableRasterViewAssumeCertified!ubyte(
+            descriptors[],
+            Region2D(
+                0,
+                0,
+                4,
+                3
+            )
+        );
+
+    bool success;
+
+    auto child =
+        parent.tryRoi(
+            Region2D(
+                1,
+                1,
+                2,
+                1
+            ),
+            success
+        );
+
+    assert(success);
+
+    PlaneExecutionTraits traits;
+
+    assert(
+        child.tryPlaneExecutionTraits(
+            0,
+            traits
+        )
+    );
+
+    assert(
+        traits.layout2D
+        == PlaneExecutionLayout2D.contiguous
+    );
+
+    assert(traits.linearContiguous1D);
+    assert(traits.flatElementCount == 2);
+
+    assert(
+        child.executionRegionBase(0)
+        == samples.ptr + 5
+    );
 }
 
 

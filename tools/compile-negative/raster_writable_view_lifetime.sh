@@ -383,6 +383,137 @@ WritableRasterView!ubyte escaped;
 D
 
 
+cat > "$tmp_dir/execution_traits_positive.d" <<'D'
+module imagery.raster.writable_view_execution_traits_positive;
+
+import imagery.raster.internal.execution_layout :
+    PlaneExecutionTraits;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST PASS.
+ *
+ * Execution-layout metadata remains readable through a const writable view.
+ */
+@safe
+bool queryWritableExecutionTraits(
+    scope ref const(WritableRasterView!ubyte) view
+)
+{
+    PlaneExecutionTraits traits;
+
+    return view.tryPlaneExecutionTraits(
+        0,
+        traits
+    );
+}
+D
+
+
+cat > "$tmp_dir/execution_base_positive.d" <<'D'
+module imagery.raster.writable_view_execution_base_positive;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST PASS.
+ *
+ * A mutable scope-borrowed writable view may locally consume the mutable
+ * execution-region base.
+ */
+@safe
+bool consumeWritableExecutionBase(
+    scope ref WritableRasterView!ubyte view
+)
+{
+    scope auto base =
+        view.executionRegionBase(0);
+
+    return
+        base is null
+        || base !is null;
+}
+D
+
+
+cat > "$tmp_dir/execution_base_const.d" <<'D'
+module imagery.raster.writable_view_execution_base_negative_const;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST FAIL.
+ *
+ * Const writable-view metadata must not recover a mutable execution pointer.
+ */
+@safe
+void mutableBaseFromConst(
+    scope ref const(WritableRasterView!ubyte) view
+)
+{
+    auto base =
+        view.executionRegionBase(0);
+
+    cast(void) base;
+}
+D
+
+
+cat > "$tmp_dir/execution_base_return.d" <<'D'
+module imagery.raster.writable_view_execution_base_negative_return;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST FAIL.
+ *
+ * Mutable execution pointer remains lifetime-bound to the scope view.
+ */
+@safe
+ubyte* escapeExecutionBase(
+    scope ref WritableRasterView!ubyte view
+)
+{
+    return view.executionRegionBase(0);
+}
+D
+
+
+cat > "$tmp_dir/execution_base_global.d" <<'D'
+module imagery.raster.writable_view_execution_base_negative_global;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+ubyte* escaped;
+
+
+/*
+ * MUST FAIL.
+ *
+ * Mutable execution pointer may not enter global storage.
+ */
+@safe
+void storeExecutionBaseGlobally(
+    scope ref WritableRasterView!ubyte view
+)
+{
+    escaped =
+        view.executionRegionBase(0);
+}
+D
+
+
 cat > "$tmp_dir/external_lease_surface.d" <<'D'
 module raster_writable_view_negative_external_lease_surface;
 
@@ -414,6 +545,13 @@ D
 
 
 compile_probe positive pass
+
+compile_probe execution_traits_positive pass
+compile_probe execution_base_positive pass
+compile_probe execution_base_const reject
+compile_probe execution_base_return reject
+compile_probe execution_base_global reject
+
 compile_probe local_escape reject
 compile_probe global_escape reject
 compile_probe const_roi reject
