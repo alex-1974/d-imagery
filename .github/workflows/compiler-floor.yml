@@ -1,0 +1,122 @@
+name: Compiler Floor Audit
+
+on:
+  push:
+    branches:
+      - research/compiler-floor-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  floor:
+    name: ${{ matrix.name }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: DMD 2.113.0 / frontend 2.113
+            compiler: dmd-2.113.0
+
+          - name: LDC 1.43.0 / frontend 2.113
+            compiler: ldc-1.43.0
+
+          - name: DMD 2.112.1 / frontend 2.112
+            compiler: dmd-2.112.1
+
+          - name: LDC 1.42.0 / frontend 2.112
+            compiler: ldc-1.42.0
+
+          - name: DMD 2.111.0 / frontend 2.111
+            compiler: dmd-2.111.0
+
+          - name: LDC 1.41.0 / frontend 2.111
+            compiler: ldc-1.41.0
+
+          - name: DMD 2.110.0 / frontend 2.110
+            compiler: dmd-2.110.0
+
+          - name: LDC 1.40.1 / frontend 2.110
+            compiler: ldc-1.40.1
+
+          - name: DMD 2.109.1 / frontend 2.109
+            compiler: dmd-2.109.1
+
+          - name: LDC 1.39.0 / frontend 2.109
+            compiler: ldc-1.39.0
+
+          - name: DMD 2.108.1 / frontend 2.108
+            compiler: dmd-2.108.1
+
+          - name: LDC 1.38.0 / frontend 2.108
+            compiler: ldc-1.38.0
+
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pinned D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler }}
+          dub: latest
+          dc_format: shortname
+
+      - name: Environment
+        shell: bash
+        run: |
+          echo "Requested compiler: ${{ matrix.compiler }}"
+          echo "DC:                 $DC"
+          echo
+
+          "$DC" --version
+          dub --version
+
+      - name: Build
+        shell: bash
+        run: |
+          dub build --compiler="$DC"
+
+      - name: Test
+        shell: bash
+        run: |
+          dub test --compiler="$DC"
+
+      - name: Raster lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_lifetime.sh "$DC"
+
+      - name: Raster construction lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_construction_lifetime.sh "$DC"
+
+      - name: Raster owned-resource compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_owned_resource.sh "$DC"
+
+      - name: Raster public-import compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_import_public.sh "$DC"
+
+      - name: Raster execution lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_execution_lifetime.sh "$DC"
+
+      - name: Raster target lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_target_lifetime.sh "$DC"
+
+      - name: Raster writable-view lifetime compile probes
+        shell: bash
+        run: |
+          tools/compile-negative/raster_writable_view_lifetime.sh "$DC"
