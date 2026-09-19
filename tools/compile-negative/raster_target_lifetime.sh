@@ -110,6 +110,217 @@ MirTargetContiguousPlane!int mirFromCaller(
 D
 
 
+        cat > "$tmp_dir/writable_view_positive.d" <<'D'
+module imagery.raster.target_lifetime_writable_view_positive;
+
+import imagery.raster.internal.target :
+    RasterTargetPlane,
+    tryBorrowContiguousTarget;
+
+import imagery.raster.internal.mir_target_adapter :
+    MirTargetContiguousPlane,
+    asMirTargetContiguous;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST PASS:
+ *
+ * caller-owned writable-view borrow
+ *     -> RasterTargetPlane
+ */
+@safe
+RasterTargetPlane!ubyte targetFromWritableView(
+    return scope ref WritableRasterView!ubyte view
+)
+{
+    bool success;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            view,
+            0,
+            success
+        );
+
+    return target;
+}
+
+
+/*
+ * MUST PASS:
+ *
+ * Lifetime provenance survives:
+ *
+ * WritableRasterView
+ *     -> RasterTargetPlane
+ *     -> Mir writable target.
+ */
+@safe
+MirTargetContiguousPlane!ubyte mirFromWritableView(
+    return scope ref WritableRasterView!ubyte view
+)
+{
+    bool success;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            view,
+            0,
+            success
+        );
+
+    return asMirTargetContiguous(
+        target
+    );
+}
+D
+
+
+        cat > "$tmp_dir/writable_view_return_target.d" <<'D'
+module imagery.raster.target_lifetime_writable_view_negative_return_target;
+
+import imagery.raster.internal.target :
+    RasterTargetPlane,
+    tryBorrowContiguousTarget;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST FAIL:
+ *
+ * A target derived from an ordinary scope writable-view borrow may not escape.
+ */
+@safe
+RasterTargetPlane!ubyte escapeWritableTarget(
+    scope ref WritableRasterView!ubyte view
+)
+{
+    bool success;
+
+    return tryBorrowContiguousTarget(
+        view,
+        0,
+        success
+    );
+}
+D
+
+
+        cat > "$tmp_dir/writable_view_return_mir.d" <<'D'
+module imagery.raster.target_lifetime_writable_view_negative_return_mir;
+
+import imagery.raster.internal.mir_target_adapter :
+    MirTargetContiguousPlane,
+    asMirTargetContiguous;
+
+import imagery.raster.internal.target :
+    tryBorrowContiguousTarget;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST FAIL:
+ *
+ * Mir adaptation must not erase the originating writable-view lifetime.
+ */
+@safe
+MirTargetContiguousPlane!ubyte escapeWritableMir(
+    scope ref WritableRasterView!ubyte view
+)
+{
+    bool success;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            view,
+            0,
+            success
+        );
+
+    return asMirTargetContiguous(
+        target
+    );
+}
+D
+
+
+        cat > "$tmp_dir/writable_view_global.d" <<'D'
+module imagery.raster.target_lifetime_writable_view_negative_global;
+
+import imagery.raster.internal.target :
+    RasterTargetPlane,
+    tryBorrowContiguousTarget;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+RasterTargetPlane!ubyte escaped;
+
+
+/*
+ * MUST FAIL:
+ *
+ * Target derived from a scope writable view may not enter global storage.
+ */
+@safe
+void storeWritableTargetGlobally(
+    scope ref WritableRasterView!ubyte view
+)
+{
+    bool success;
+
+    escaped =
+        tryBorrowContiguousTarget(
+            view,
+            0,
+            success
+        );
+}
+D
+
+
+        cat > "$tmp_dir/writable_view_const.d" <<'D'
+module imagery.raster.target_lifetime_writable_view_negative_const;
+
+import imagery.raster.internal.target :
+    tryBorrowContiguousTarget;
+
+import imagery.raster.writable_view :
+    WritableRasterView;
+
+
+/*
+ * MUST FAIL:
+ *
+ * Const writable-view metadata must not recover a mutable target capability.
+ */
+@safe
+void targetFromConstWritableView(
+    scope ref const(WritableRasterView!ubyte) view
+)
+{
+    bool success;
+
+    auto target =
+        tryBorrowContiguousTarget(
+            view,
+            0,
+            success
+        );
+
+    cast(void) target;
+}
+D
+
+
         cat > "$tmp_dir/return_target.d" <<'D'
 module imagery.raster.target_lifetime_negative_return_target;
 
@@ -298,6 +509,13 @@ D
         echo "compiler=$compiler"
 
         compile_probe positive pass
+        compile_probe writable_view_positive pass
+
+        compile_probe writable_view_return_target reject
+        compile_probe writable_view_return_mir reject
+        compile_probe writable_view_global reject
+        compile_probe writable_view_const reject
+
         compile_probe return_target reject
         compile_probe return_mir reject
         compile_probe global_target reject
