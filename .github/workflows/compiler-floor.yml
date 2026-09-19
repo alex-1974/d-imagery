@@ -17,19 +17,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS x86-64 / DMD 2.110.0
+          - name: macOS x86-64 / DMD 2.112.1
             os: macos-15-intel
-            compiler: dmd-2.110.0
+            compiler: dmd-2.112.1
             dub: latest
 
-          - name: macOS x86-64 / LDC 1.40.1
+          - name: macOS x86-64 / LDC 1.42.0
             os: macos-15-intel
-            compiler: ldc-1.40.1
+            compiler: ldc-1.42.0
             dub: latest
 
-          - name: macOS ARM64 / LDC 1.40.1
+          - name: macOS ARM64 / LDC 1.42.0
             os: macos-15
-            compiler: ldc-1.40.1
+            compiler: ldc-1.42.0
             dub: latest
 
     runs-on: ${{ matrix.os }}
