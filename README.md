@@ -24,11 +24,13 @@ The retained raster foundation now includes:
 - checked `ubyte -> float` conversion;
 - per-resource read/write provenance;
 - writable-backing certification;
-- a package-internal semantic `WritableRasterView`.
+- a package-internal semantic `WritableRasterView`;
+- a lease-bound package-internal writable borrow from `RasterLease`.
 
-The writable semantic layer is not public yet. The next unfinished step is the
-lease-bound writable borrow from `RasterLease`; writable execution adaptation
-and stable public operation contracts come afterwards.
+The writable semantic layer is not public yet. Semantic lifetime integration is
+complete; the next unfinished step is deriving internal writable execution
+capabilities from `WritableRasterView`. Stable public operation contracts come
+afterwards.
 
 The public API remains experimental. Performance-sensitive implementation is
 developed from measured evidence and validated with both DMD and LDC.

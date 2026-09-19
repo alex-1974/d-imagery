@@ -1,6 +1,6 @@
 # imagery-d Roadmap
 
-## Current implementation checkpoint — 2026-09-18
+## Current implementation checkpoint — 2026-09-19
 
 The repository has progressed beyond the initial architecture-only stage while
 the long-term milestone structure below remains valid.
@@ -16,7 +16,10 @@ Current core status:
 - per-resource `readOnly` / `readWrite` provenance is retained;
 - writable backing certification is implemented;
 - package-internal `WritableRasterView` with writable ROI, sample read and
-  sample write semantics is implemented and DIP1000-tested with DMD and LDC.
+  sample write semantics is implemented and DIP1000-tested with DMD and LDC;
+- `RasterLease` can derive a package-internal lease-bound writable borrow from
+  retained `readWrite` resources, while const leases and escaping borrows are
+  rejected by the DIP1000 lifetime model.
 
 The current raster-operations sequence is:
 
@@ -28,8 +31,8 @@ E5.4c.1  retained ResourceAccess implementation       complete
 E5.4d    semantic writable-view contract              complete
 E5.4d.1a writable backing certification               complete
 E5.4d.1b semantic WritableRasterView implementation   complete
-E5.4d.1c RasterLease -> writable borrow                next
-E5.4e    writable execution capabilities              not started
+E5.4d.1c RasterLease -> writable borrow                complete
+E5.4e    writable execution capabilities              next
 E5.4f    public operation contract redesign            not started
 E5.4g    stable public operation exposure              not started
 ```
@@ -38,9 +41,10 @@ E5.4g    stable public operation exposure              not started
 write permission but does not imply uniqueness, non-aliasing, contiguity or
 thread exclusivity.
 
-M0 is therefore substantially implemented for the resident raster/view core,
-but is not considered complete until the writable lifetime integration and
-remaining API stabilization work have been finished.
+The resident raster/view core now includes both read-only and writable
+lease-bound lifetime integration. Remaining work before API stabilization is
+primarily the writable execution bridge and the public operation-contract
+design.
 
 M2 has partial internal implementation used to validate the engine
 architecture; copy, reduction and conversion machinery are not yet exposed as

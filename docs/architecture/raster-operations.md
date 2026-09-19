@@ -4117,9 +4117,9 @@ define public copy/conversion APIs
 Those remain subsequent E5.4 stages.
 
 
-#### E5.4d.1 implementation checkpoint — 2026-09-18
+#### E5.4d.1 implementation checkpoint — 2026-09-19
 
-The first two implementation slices are now complete.
+All three semantic/lifetime implementation slices are now complete.
 
 `E5.4d.1a` added package-internal writable-backing certification. Ordinary
 backing validation remains the physical safety proof; writable certification
@@ -4156,13 +4156,66 @@ raw assume-certified constructor use   rejected outside its module
 external writable-view surface         rejected
 ```
 
-`E5.4d.1c` remains deliberately unimplemented. The next question is how the
-existing `SafeRefCounted.borrow` path should expose a non-const,
-lease-lifetime-bound writable borrow while preventing write capability from
-being recovered through a const `RasterLease`.
+`E5.4d.1c` adds the lease-bound writable borrow.
+
+The implemented topology is:
+
+```text
+mutable RasterLease
+        |
+        | package-internal tryWritableView(...)
+        v
+SafeRefCounted.borrow
+        |
+        v
+retained RasterBacking
+        |
+        v
+ordinary backing validation
+        |
+        v
+writable resource certification
+        |
+        v
+WritableRasterView
+```
+
+The existing complete writable-view factory is deliberately reused even though
+the retained backing was already validated before entering `RasterLease`.
+This repeats ordinary validation on writable-borrow creation, but avoids adding
+a second assume-validated capability-construction boundary before performance
+evidence justifies one.
+
+DMD and LDC compile probes establish that:
+
+```text
+mutable lease -> local writable borrow          accepted
+caller-owned lease -> propagated writable borrow accepted
+local lease -> returned writable view           rejected
+local lease -> global writable view             rejected
+const lease -> writable borrow                  rejected
+const SafeRefCounted -> mutable payload borrow  rejected
+```
+
+The real `WritableRasterView` surface is usable through a `scope` borrow,
+including:
+
+```text
+planeCount / region / width / height / empty
+trySample
+trySetSample
+tryRoi
+```
+
+A read-only backing remains valid for `RasterView` but fails writable
+certification. A retained backing whose resources carry `readWrite` provenance
+may publish the writable semantic capability.
+
+`RasterLease.init` also fails the writable-borrow operation safely without
+entering an uninitialized `SafeRefCounted` payload.
 
 No writable execution bridge or public raster operation API is introduced by
-E5.4d.1a/b.
+E5.4d.1a/b/c.
 
 ### E5.4 progression
 
@@ -4192,7 +4245,7 @@ E5.4d
 
 E5.4d.1
     implement and verify package-internal WritableRasterView
-    -> partially complete
+    -> complete
 
     E5.4d.1a
         writable backing certification
@@ -4210,10 +4263,12 @@ E5.4d.1
         lease-bound writable borrow
         RasterLease -> WritableRasterView
         const-lease exclusion
-        -> next
+        DIP1000 escape protection
+        -> complete
 
 E5.4e
     derive internal writable execution capabilities from that view
+    -> next
 
 E5.4f
     redesign public operation contracts independently of current dispatchers
