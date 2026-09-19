@@ -4270,6 +4270,181 @@ E5.4e
     derive internal writable execution capabilities from that view
     -> next
 
+#### E5.4e.0 writable execution consumer audit — 2026-09-19
+
+E5.4d established the semantic writable capability and its retained lifetime.
+E5.4e now asks which execution capabilities are justified by existing
+consumers.
+
+The current writable execution consumers are:
+
+```text
+checked same-type copy
+    RasterView source
+        ->
+    RasterTargetPlane target
+
+exact ubyte -> float conversion
+    RasterView!ubyte source
+        ->
+    RasterTargetPlane!float target
+```
+
+Both operations currently require the target to be:
+
+```text
+single logical plane
+contiguous 2D
+linear contiguous 1D
+```
+
+The existing Mir writable adapters likewise expose only:
+
+```text
+contiguous 2D target
+flat contiguous 1D target
+```
+
+There is currently no production consumer requiring a writable:
+
+```text
+Universal 2D target
+Canonical padded target
+negative-stride target adapter
+general affine writable Mir slice
+```
+
+E5.4e must therefore not create those capabilities speculatively.
+
+The first execution bridge should derive the already-existing
+`RasterTargetPlane!T` capability from a certified `WritableRasterView!T` only
+when the represented plane satisfies the existing flat-contiguous execution
+requirements.
+
+The intended layering is:
+
+```text
+WritableRasterView
+        |
+        | package-internal execution metadata
+        v
+PlaneExecutionTraits
+        |
+        | require linearContiguous1D
+        | for non-empty storage
+        v
+mutable region-origin execution pointer
+        |
+        | narrow trusted pointer/slice formation
+        v
+RasterTargetPlane
+        |
+        +-- existing Mir target adapters
+        +-- checked copy
+        `-- exact ubyte -> float conversion
+```
+
+`RasterTargetPlane` remains downstream execution machinery.
+
+The dependency direction must therefore remain:
+
+```text
+internal target layer
+    imports / consumes
+WritableRasterView
+```
+
+and not:
+
+```text
+WritableRasterView
+    depends on
+RasterTargetPlane
+```
+
+The semantic writable view must remain independent of Mir and concrete target
+representations.
+
+The minimum `WritableRasterView` execution surface justified by the current
+consumer is:
+
+```text
+tryPlaneExecutionTraits(...)
+mutable executionRegionBase(...)
+```
+
+The first query exposes only derived layout metadata.
+
+The second is the narrow package-internal mutable pointer boundary consuming
+the writability already established by E5.4d certification.
+
+No writable equivalent of:
+
+```text
+tryExecutionPlaneStrides(...)
+```
+
+is required yet because no current writable consumer needs explicit arbitrary
+strides.
+
+It should be added only when a concrete Canonical or Universal writable
+execution consumer requires it.
+
+Empty regions require special treatment consistent with the existing operation
+model:
+
+```text
+valid plane + empty WritableRasterView
+    ->
+valid empty RasterTargetPlane
+```
+
+No mutable sample pointer is formed for the empty case and no flat-contiguous
+sample capability is required because there are no reachable samples.
+
+For a non-empty view, target derivation requires:
+
+```text
+valid plane index
+linearContiguous1D == true
+representable flatElementCount
+mutable region-origin pointer
+```
+
+The existing backing validation has already established physical reachability.
+Writable certification has already established write permission.
+
+The target derivation must not infer:
+
+```text
+unique ownership
+exclusive borrow
+noalias
+source/target non-overlap
+thread exclusivity
+```
+
+Those remain separate operation-local facts.
+
+The initial E5.4e implementation should therefore be split into:
+
+```text
+E5.4e.1
+    add only the writable execution metadata/base primitives required by the
+    contiguous target consumer
+
+E5.4e.2
+    derive RasterTargetPlane from WritableRasterView for valid contiguous
+    planes, including empty-view semantics and DIP1000 lifetime tests
+
+E5.4e.3
+    verify existing copy/conversion consumers can use the derived target
+    without exposing WritableRasterView, RasterTargetPlane, Mir, or execution
+    layouts publicly
+```
+
+No broader writable execution abstraction is justified by current evidence.
+
 E5.4f
     redesign public operation contracts independently of current dispatchers
 
