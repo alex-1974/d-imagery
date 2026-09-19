@@ -34,7 +34,14 @@ then
 fi
 
 
-mapfile -t import_paths < <(
+import_args=()
+
+while IFS= read -r path
+do
+    if [ -n "$path" ]; then
+        import_args+=("-I$path")
+    fi
+done < <(
     jq -r '
         .packages[]
         | .path as $base
@@ -46,12 +53,12 @@ mapfile -t import_paths < <(
     ' "$tmp_dir/describe.json"
 )
 
-import_args=()
 
-for path in "${import_paths[@]}"
-do
-    import_args+=("-I$path")
-done
+if [ "${#import_args[@]}" -eq 0 ]; then
+    echo "ERROR: dub describe produced no import paths"
+    rm -rf "$tmp_dir"
+    exit 1
+fi
 
 
 cat > "$tmp_dir/positive.d" <<'D'
